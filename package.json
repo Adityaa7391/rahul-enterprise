@@ -1,0 +1,14 @@
+{
+  "name": "rahul-enterprise",
+  "version": "1.0.0",
+  "description": "Rahul Enterprise Logistics Platform - Full Stack",
+  "scripts": {
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "seed": "cd backend && npm run seed",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm start",
+    "start:backend": "cd backend && npm start",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "devDependencies": {}
+}
