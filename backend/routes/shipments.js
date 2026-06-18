@@ -1,6 +1,36 @@
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
+const multer  = require('multer');
+const path    = require('path');
+const fs      = require('fs');
 const Shipment = require('../models/Shipment');
+
+// ── Multer config — save to /uploads/shipments/<shipmentId>/ ──
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', 'uploads', 'shipments', req.params.id);
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext  = path.extname(file.originalname).toLowerCase();
+    const name = `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+    cb(null, name);
+  },
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowed = /jpeg|jpg|png|webp|gif/;
+  const ok = allowed.test(path.extname(file.originalname).toLowerCase()) &&
+             allowed.test(file.mimetype);
+  ok ? cb(null, true) : cb(new Error('Only image files are allowed (jpg, png, webp, gif).'));
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB per file, max 1 file
+});
 
 // ── GET /shipments/stats/summary ──
 router.get('/stats/summary', async (req, res) => {
@@ -49,7 +79,7 @@ router.get('/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-// ── POST /shipments — save new shipment ──
+// ── POST /shipments — create new shipment ──
 router.post('/', async (req, res) => {
   try {
     const {
@@ -62,13 +92,11 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Challan Number is required.' });
     }
 
-    // Duplicate CN check
     if (trackingId) {
       const existing = await Shipment.findOne({ trackingId });
       if (existing) return res.status(400).json({ success: false, message: `CN Number "${trackingId}" already exists.` });
     }
 
-    // Set createdAt from bookingDate
     let createdAtDate = new Date();
     if (bookingDate) {
       createdAtDate = new Date(bookingDate);
@@ -87,6 +115,7 @@ router.post('/', async (req, res) => {
       weight,
       description,
       status: 'Booked',
+      images: [],
       createdAt: createdAtDate,
       updatedAt: new Date(),
       trackingEvents: [{
@@ -100,19 +129,106 @@ router.post('/', async (req, res) => {
     if (estimatedDelivery) shipmentData.estimatedDelivery = new Date(estimatedDelivery);
     if (serviceType === 'Dedicated Vehicle') shipmentData.gpsEnabled = true;
 
-    // Use insertOne — this saves createdAt as-is without Mongoose defaults
     const result = await Shipment.collection.insertOne(shipmentData);
-    const saved = await Shipment.findById(result.insertedId);
+    const saved  = await Shipment.findById(result.insertedId);
 
-    console.log(`✅ Shipment saved: ${trackingId} | createdAt: ${createdAtDate}`);
+    console.log(`Shipment saved: ${trackingId} | createdAt: ${createdAtDate}`);
     res.status(201).json({ success: true, data: saved });
   } catch (e) {
-    console.error('❌ POST /shipments error:', e.message);
+    console.error('POST /shipments error:', e.message);
     res.status(500).json({ success: false, message: e.message });
   }
 });
 
-// ── PUT /shipments/:id — edit shipment ──
+// ── POST /shipments/:id/images — upload image to existing shipment ──
+router.post('/:id/images', (req, res) => {
+  upload.array('images', 1)(req, res, async (err) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({ success: false, message: `Upload error: ${err.message}` });
+    }
+    if (err) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+
+    try {
+      const shipment = await Shipment.findById(req.params.id);
+      if (!shipment) {
+        // Clean up uploaded files if shipment not found
+        if (req.files) req.files.forEach(f => fs.unlink(f.path, () => {}));
+        return res.status(404).json({ success: false, message: 'Shipment not found' });
+      }
+
+      // Build image records pointing to the public URL path
+      const newImages = (req.files || []).map(file => ({
+        url: `/uploads/shipments/${req.params.id}/${file.filename}`,
+        originalName: file.originalname,
+        uploadedAt: new Date(),
+      }));
+
+      if (newImages.length === 0) {
+        return res.status(400).json({ success: false, message: 'No valid images received.' });
+      }
+
+      // Check total image limit (max 1 per shipment)
+      const currentCount = shipment.images ? shipment.images.length : 0;
+      const allowedCount = 1 - currentCount;
+      if (allowedCount <= 0) {
+        newImages.forEach(img => {
+          const filePath = path.join(__dirname, '..', img.url);
+          fs.unlink(filePath, () => {});
+        });
+        return res.status(400).json({ success: false, message: 'Shipment already has 1 image (maximum).' });
+      }
+
+      const toSave = newImages.slice(0, allowedCount);
+
+      const updated = await Shipment.findByIdAndUpdate(
+        req.params.id,
+        {
+          $push: { images: { $each: toSave } },
+          $set:  { updatedAt: new Date() },
+        },
+        { new: true }
+      );
+
+      console.log(`Images uploaded for shipment ${req.params.id}: ${toSave.length} file(s)`);
+      res.status(201).json({ success: true, data: updated, uploaded: toSave.length });
+    } catch (e) {
+      console.error('POST /shipments/:id/images error:', e.message);
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+});
+
+// ── DELETE /shipments/:id/images/:imageId — remove a single image ──
+router.delete('/:id/images/:imageId', async (req, res) => {
+  try {
+    const shipment = await Shipment.findById(req.params.id);
+    if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
+
+    const image = shipment.images.id(req.params.imageId);
+    if (!image) return res.status(404).json({ success: false, message: 'Image not found' });
+
+    // Delete file from disk
+    const filePath = path.join(__dirname, '..', image.url);
+    fs.unlink(filePath, (unlinkErr) => {
+      if (unlinkErr) console.warn('Could not delete file from disk:', filePath);
+    });
+
+    await Shipment.findByIdAndUpdate(
+      req.params.id,
+      { $pull: { images: { _id: req.params.imageId } }, $set: { updatedAt: new Date() } },
+      { new: true }
+    );
+
+    res.json({ success: true, message: 'Image deleted.' });
+  } catch (e) {
+    console.error('DELETE /shipments/:id/images/:imageId error:', e.message);
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ── PUT /shipments/:id — edit shipment details ──
 router.put('/:id', async (req, res) => {
   try {
     const {
@@ -151,7 +267,7 @@ router.put('/:id', async (req, res) => {
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
     res.json({ success: true, data: shipment });
   } catch (e) {
-    console.error('❌ PUT /shipments/:id error:', e.message);
+    console.error('PUT /shipments/:id error:', e.message);
     res.status(500).json({ success: false, message: e.message });
   }
 });
@@ -187,16 +303,24 @@ router.put('/:id/status', async (req, res) => {
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
     res.json({ success: true, data: shipment });
   } catch (e) {
-    console.error('❌ PUT /shipments/:id/status error:', e.message);
+    console.error('PUT /shipments/:id/status error:', e.message);
     res.status(500).json({ success: false, message: e.message });
   }
 });
 
-// ── DELETE /shipments/:id ──
+// ── DELETE /shipments/:id — delete shipment and its images ──
 router.delete('/:id', async (req, res) => {
   try {
-    const shipment = await Shipment.findByIdAndDelete(req.params.id);
+    const shipment = await Shipment.findById(req.params.id);
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
+
+    // Delete the image folder for this shipment from disk
+    const imageDir = path.join(__dirname, '..', 'uploads', 'shipments', req.params.id);
+    fs.rm(imageDir, { recursive: true, force: true }, (err) => {
+      if (err) console.warn('Could not remove image folder:', imageDir);
+    });
+
+    await Shipment.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: 'Deleted successfully' });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });

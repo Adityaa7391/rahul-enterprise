@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import API from '../utils/api';
@@ -12,7 +12,8 @@ const EMPTY_FORM = {
   origin: '',
   destination: '',
   serviceType: 'Surface Express',
-  date: new Date().toISOString().split('T')[0],
+  dispatchDate: new Date().toISOString().split('T')[0],
+  expectedDeliveryDate: '',
 };
 
 const fmtDate = (dateVal) => {
@@ -23,6 +24,13 @@ const fmtDate = (dateVal) => {
   const mmm = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
   const yyyy = d.getFullYear();
   return `${dd}-${mmm}-${yyyy}`;
+};
+
+const resolveImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http')) return url;
+  const base = (process.env.REACT_APP_API_URL || '').replace(/\/api$/, '');
+  return `${base}${url}`;
 };
 
 const AdminDashboard = () => {
@@ -36,6 +44,7 @@ const AdminDashboard = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newShipment, setNewShipment] = useState(EMPTY_FORM);
   const [addMsg, setAddMsg] = useState('');
+  const [uploading, setUploading] = useState(false);
 
   const [editShipment, setEditShipment] = useState(null);
   const [editMsg, setEditMsg] = useState('');
@@ -46,6 +55,17 @@ const AdminDashboard = () => {
 
   const [misSearch, setMisSearch] = useState('');
   const [misFilter, setMisFilter] = useState('all');
+
+  const [viewImages, setViewImages] = useState(null);
+  const [viewIndex, setViewIndex] = useState(0);
+
+  // Upload Image modal
+  const [uploadTarget, setUploadTarget] = useState(null);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState('');
+  const [deletingImageId, setDeletingImageId] = useState(null);
+  const uploadModalInputRef = useRef(null);
 
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
@@ -63,7 +83,12 @@ const AdminDashboard = () => {
     finally { setLoading(false); }
   };
 
-  // ── Stats ──
+  useEffect(() => {
+    if (!uploadTarget) return;
+    const fresh = shipments.find(s => s._id === uploadTarget._id);
+    if (fresh) setUploadTarget(fresh);
+  }, [shipments]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const todayStr = new Date().toISOString().split('T')[0];
   const todayShipments = shipments.filter(s => {
     const d = s.createdAt ? new Date(s.createdAt).toISOString().split('T')[0] : '';
@@ -84,7 +109,6 @@ const AdminDashboard = () => {
     pending:   shipments.filter(s => ['Booked','Picked Up','In Transit','Out for Delivery'].includes(s.status)).length,
   };
 
-  // ── Shipments tab filter ──
   const filteredShipments = shipments.filter(s => {
     const matchSearch = shipmentSearch.trim()
       ? (s.trackingId?.toLowerCase().includes(shipmentSearch.trim().toLowerCase()) ||
@@ -94,7 +118,6 @@ const AdminDashboard = () => {
     return matchSearch && matchStatus;
   });
 
-  // ── MIS tab ──
   const getFilterCutoff = () => {
     const now = new Date(); now.setHours(0,0,0,0);
     if (misFilter === '7d')  { now.setDate(now.getDate() - 6);   return now; }
@@ -122,105 +145,112 @@ const AdminDashboard = () => {
   }, {});
   const deliveredDates = Object.keys(deliveredByDate).sort((a,b) => b.localeCompare(a));
 
-  // ── Delete single ──
-  const handleDeleteShipment = async (id, trackingId) => {
-    if (!window.confirm(`Are you sure you want to permanently delete "${trackingId}"?\n\nThis action cannot be undone.`)) return;
-    try {
-      setDeleting(true);
-      await API.delete(`/shipments/${id}`);
-      await fetchAll();
-    } catch (e) {
-      alert('Delete failed: ' + (e.response?.data?.message || e.message));
-    } finally { setDeleting(false); }
+  const resetAddForm = () => {
+    setNewShipment(EMPTY_FORM);
+    setShowAddForm(false);
+    setAddMsg('');
   };
 
-  // ── Delete All (filtered shipments tab) ──
-  const handleDeleteAllFiltered = async () => {
-    const count = filteredShipments.length;
-    if (count === 0) return;
-    const label = statusFilter === 'all' ? 'ALL' : `all "${statusFilter}"`;
-    if (!window.confirm(`⚠️ WARNING!\n\n${label} ${count} shipments will be PERMANENTLY deleted.\n\nAre you absolutely sure? This action cannot be undone!`)) return;
-    if (!window.confirm(`LAST WARNING!\n\n${count} shipments are about to be deleted. Confirm.`)) return;
-    try {
-      setDeleting(true);
-      await Promise.all(filteredShipments.map(s => API.delete(`/shipments/${s._id}`)));
-      await fetchAll();
-    } catch (e) {
-      alert('Delete All failed: ' + (e.response?.data?.message || e.message));
-    } finally { setDeleting(false); }
-  };
-
-  // ── Delete single MIS (delivered) ──
-  const handleDeleteMisShipment = async (id, trackingId) => {
-    if (!window.confirm(`Are you sure you want to permanently delete "${trackingId}" from MIS?\n\nThis action cannot be undone.`)) return;
-    try {
-      setDeleting(true);
-      await API.delete(`/shipments/${id}`);
-      await fetchAll();
-    } catch (e) {
-      alert('Delete failed: ' + (e.response?.data?.message || e.message));
-    } finally { setDeleting(false); }
-  };
-
-  // ── Delete All visible delivered (MIS tab) ──
-  const handleDeleteAllDelivered = async () => {
-    const count = filteredDelivered.length;
-    if (count === 0) return;
-    const period = misFilter === 'all' ? 'ALL TIME' : misFilter === '7d' ? 'Last 7 Days' : misFilter === '30d' ? 'Last 30 Days' : 'Last 6 Months';
-    if (!window.confirm(`⚠️ WARNING!\n\n${period} ${count} delivered shipments will be PERMANENTLY deleted.\n\nAre you sure?`)) return;
-    if (!window.confirm(`LAST WARNING!\n\n${count} delivered shipments are about to be deleted. Confirm.`)) return;
-    try {
-      setDeleting(true);
-      await Promise.all(filteredDelivered.map(s => API.delete(`/shipments/${s._id}`)));
-      await fetchAll();
-    } catch (e) {
-      alert('Delete All failed: ' + (e.response?.data?.message || e.message));
-    } finally { setDeleting(false); }
-  };
-
-  // ── Add shipment ──
   const handleAddShipment = async () => {
     if (!newShipment.cnNumber || !newShipment.challanNumber || !newShipment.origin || !newShipment.destination) {
-      setAddMsg('❌ CN Number, Challan Number, Origin, and Destination are required.');
+      setAddMsg('CN Number, Challan Number, Origin, and Destination are required.');
       return;
     }
     try {
+      setUploading(true);
+      setAddMsg('Creating shipment...');
       await API.post('/shipments', {
         trackingId:    newShipment.cnNumber.trim(),
         challanNumber: newShipment.challanNumber.trim(),
         origin:        newShipment.origin.trim(),
         destination:   newShipment.destination.trim(),
         serviceType:   newShipment.serviceType,
-        bookingDate:   newShipment.date,
+        bookingDate:   newShipment.dispatchDate,
+        estimatedDelivery: newShipment.expectedDeliveryDate || undefined,
         sender:   { name: 'N/A', email: '' },
         receiver: { name: 'N/A', email: '' },
       });
-      setAddMsg('✅ Shipment created: ' + newShipment.cnNumber.trim());
+      setAddMsg(`Shipment created: ${newShipment.cnNumber.trim()}.`);
       setNewShipment(EMPTY_FORM);
       setShowAddForm(false);
       fetchAll();
     } catch (e) {
-      setAddMsg('❌ Error: ' + (e.response?.data?.message || e.message));
+      setAddMsg('Error: ' + (e.response?.data?.message || e.message));
+    } finally {
+      setUploading(false);
     }
   };
 
-  // ── Edit ──
+  const handleDeleteShipment = async (id, trackingId) => {
+    if (!window.confirm(`Permanently delete "${trackingId}"? This cannot be undone.`)) return;
+    try {
+      setDeleting(true);
+      await API.delete(`/shipments/${id}`);
+      await fetchAll();
+    } catch (e) {
+      alert('Delete failed: ' + (e.response?.data?.message || e.message));
+    } finally { setDeleting(false); }
+  };
+
+  const handleDeleteAllFiltered = async () => {
+    const count = filteredShipments.length;
+    if (count === 0) return;
+    const label = statusFilter === 'all' ? 'ALL' : `all "${statusFilter}"`;
+    if (!window.confirm(`WARNING: ${label} ${count} shipments will be permanently deleted. Are you sure?`)) return;
+    if (!window.confirm(`CONFIRM: ${count} shipments will be deleted. This cannot be undone.`)) return;
+    try {
+      setDeleting(true);
+      await Promise.all(filteredShipments.map(s => API.delete(`/shipments/${s._id}`)));
+      await fetchAll();
+    } catch (e) {
+      alert('Delete failed: ' + (e.response?.data?.message || e.message));
+    } finally { setDeleting(false); }
+  };
+
+  const handleDeleteMisShipment = async (id, trackingId) => {
+    if (!window.confirm(`Permanently delete "${trackingId}" from MIS? This cannot be undone.`)) return;
+    try {
+      setDeleting(true);
+      await API.delete(`/shipments/${id}`);
+      await fetchAll();
+    } catch (e) {
+      alert('Delete failed: ' + (e.response?.data?.message || e.message));
+    } finally { setDeleting(false); }
+  };
+
+  const handleDeleteAllDelivered = async () => {
+    const count = filteredDelivered.length;
+    if (count === 0) return;
+    const period = { all:'All Time', '7d':'Last 7 Days', '30d':'Last 30 Days', '6m':'Last 6 Months' }[misFilter];
+    if (!window.confirm(`WARNING: ${period} — ${count} delivered shipments will be permanently deleted.`)) return;
+    if (!window.confirm(`CONFIRM: ${count} delivered shipments will be deleted. This cannot be undone.`)) return;
+    try {
+      setDeleting(true);
+      await Promise.all(filteredDelivered.map(s => API.delete(`/shipments/${s._id}`)));
+      await fetchAll();
+    } catch (e) {
+      alert('Delete failed: ' + (e.response?.data?.message || e.message));
+    } finally { setDeleting(false); }
+  };
+
   const openEdit = (s) => {
     setEditShipment({
-      _id:         s._id,
-      cnNumber:    s.trackingId || '',
+      _id:          s._id,
+      cnNumber:     s.trackingId || '',
       challanNumber: s.challanNumber || '',
-      origin:      s.origin || '',
-      destination:   s.destination || '',
-      serviceType:   s.serviceType || 'Surface Express',
-      date: s.createdAt ? new Date(s.createdAt).toISOString().split('T')[0] : todayStr,
+      origin:       s.origin || '',
+      destination:  s.destination || '',
+      serviceType:  s.serviceType || 'Surface Express',
+      dispatchDate: s.createdAt ? new Date(s.createdAt).toISOString().split('T')[0] : todayStr,
+      expectedDeliveryDate: s.estimatedDelivery ? new Date(s.estimatedDelivery).toISOString().split('T')[0] : '',
     });
     setEditMsg('');
     setEditSaving(false);
   };
+
   const handleEditSave = async () => {
     if (!editShipment.cnNumber || !editShipment.challanNumber || !editShipment.origin || !editShipment.destination) {
-      setEditMsg('❌ All fields are required.');
+      setEditMsg('All fields are required.');
       return;
     }
     setEditSaving(true); setEditMsg('');
@@ -231,17 +261,17 @@ const AdminDashboard = () => {
         origin:        editShipment.origin.trim(),
         destination:   editShipment.destination.trim(),
         serviceType:   editShipment.serviceType,
-        bookingDate:   editShipment.date,
+        bookingDate:   editShipment.dispatchDate,
+        estimatedDelivery: editShipment.expectedDeliveryDate || undefined,
       });
-      setEditMsg('✅ Saved!');
+      setEditMsg('Saved successfully.');
       setTimeout(() => { setEditShipment(null); fetchAll(); }, 700);
     } catch (e) {
-      setEditMsg('❌ ' + (e.response?.data?.message || e.message));
+      setEditMsg('Error: ' + (e.response?.data?.message || e.message));
       setEditSaving(false);
     }
   };
 
-  // ── Download Excel ──
   const downloadExcel = () => {
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
@@ -251,10 +281,11 @@ const AdminDashboard = () => {
       const d = s.createdAt ? new Date(s.createdAt) : null;
       return d && d >= oneYearAgo;
     }).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
-    const headers = ['CN Number','Challan Number','Booking Date','Origin','Destination','Service Type','Status'];
+    const headers = ['CN Number','Challan Number','Dispatch Date','Expected Delivery','Origin','Destination','Service Type','Status'];
     const rows = yearData.map(s => [
       '\t'+(s.trackingId||''), '\t'+(s.challanNumber||''),
-      fmtDate(s.createdAt), s.origin||'', s.destination||'', s.serviceType||'', s.status||'',
+      fmtDate(s.createdAt), fmtDate(s.estimatedDelivery),
+      s.origin||'', s.destination||'', s.serviceType||'', s.status||'',
     ]);
     const csv = [
       headers.map(h=>`"${h}"`).join(','),
@@ -267,15 +298,82 @@ const AdminDashboard = () => {
     URL.revokeObjectURL(url);
   };
 
-  // ── Status update ──
   const updateShipmentStatus = async (id, status, location) => {
     try {
       await API.put(`/shipments/${id}/status`, {
-        status, location: location||'Hub',
+        status, location: location || 'Hub',
         description: `Status updated to ${status}`,
       });
       fetchAll();
     } catch (e) { alert('Status update failed'); }
+  };
+
+  const openViewer = (s) => {
+    const urls = (s.images || []).map(img => resolveImageUrl(img.url));
+    if (urls.length === 0) return;
+    setViewImages({ trackingId: s.trackingId, images: urls });
+    setViewIndex(0);
+  };
+
+  const openUploadModal = (s) => {
+    if (s.status !== 'Delivered') return;
+    setUploadTarget(s);
+    setUploadFile(null);
+    setUploadMsg('');
+    setDeletingImageId(null);
+  };
+
+  const closeUploadModal = () => {
+    if (uploadFile?.preview) URL.revokeObjectURL(uploadFile.preview);
+    setUploadTarget(null);
+    setUploadFile(null);
+    setUploadMsg('');
+    setDeletingImageId(null);
+  };
+
+  const handleUploadFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !file.type.startsWith('image/')) return;
+    if (uploadFile?.preview) URL.revokeObjectURL(uploadFile.preview);
+    setUploadFile({ file, preview: URL.createObjectURL(file), name: file.name });
+    setUploadMsg('');
+  };
+
+  const handleUploadImageSubmit = async () => {
+    if (!uploadTarget || !uploadFile) return;
+    setUploadingImage(true);
+    setUploadMsg('');
+    try {
+      const formData = new FormData();
+      formData.append('images', uploadFile.file);
+      await API.post(`/shipments/${uploadTarget._id}/images`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (uploadFile?.preview) URL.revokeObjectURL(uploadFile.preview);
+      setUploadFile(null);
+      setUploadMsg('Image uploaded successfully.');
+      await fetchAll();
+    } catch (e) {
+      setUploadMsg('Error: ' + (e.response?.data?.message || e.message));
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleDeleteUploadedImage = async (imageId) => {
+    if (!uploadTarget) return;
+    if (!window.confirm('Remove this image permanently?')) return;
+    setDeletingImageId(imageId);
+    try {
+      await API.delete(`/shipments/${uploadTarget._id}/images/${imageId}`);
+      setUploadMsg('Image removed.');
+      await fetchAll();
+    } catch (e) {
+      setUploadMsg('Error: ' + (e.response?.data?.message || e.message));
+    } finally {
+      setDeletingImageId(null);
+    }
   };
 
   // ── Styles ──
@@ -311,6 +409,9 @@ const AdminDashboard = () => {
     fontWeight:700, fontSize:'0.8rem', whiteSpace:'nowrap',
   };
 
+  const existingImages = uploadTarget?.images || [];
+  const canUploadMore = existingImages.length < 1;
+
   if (loading) return (
     <div style={{ minHeight:'100vh', background:'#0a1628', display:'flex', alignItems:'center', justifyContent:'center' }}>
       <div style={{ color:'#e85d04', fontFamily:"'Bebas Neue',sans-serif", fontSize:'2rem' }}>Loading Dashboard...</div>
@@ -320,7 +421,34 @@ const AdminDashboard = () => {
   return (
     <div style={{ minHeight:'100vh', background:'#f4f1ec', display:'flex', flexDirection:'column' }}>
 
-      {/* ── Edit Modal ── */}
+      {/* Image Viewer Modal */}
+      {viewImages && (
+        <div onClick={() => setViewImages(null)}
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.88)', zIndex:2000, display:'flex', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:'#0a1628', borderRadius:14, padding:'1.5rem', maxWidth:740, width:'100%', maxHeight:'92vh', display:'flex', flexDirection:'column', gap:'1rem' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ color:'white', fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.2rem' }}>
+                {viewImages.trackingId} — Image {viewIndex + 1} / {viewImages.images.length}
+              </span>
+              <button onClick={() => setViewImages(null)} style={{ background:'transparent', border:'none', color:'#9ca3af', fontSize:'1.5rem', cursor:'pointer' }}>✕</button>
+            </div>
+            <img src={viewImages.images[viewIndex]} alt={`Shipment image ${viewIndex + 1}`}
+              style={{ width:'100%', maxHeight:'66vh', objectFit:'contain', borderRadius:8, background:'#122040' }} />
+            {viewImages.images.length > 1 && (
+              <div style={{ display:'flex', gap:'0.5rem', justifyContent:'center', flexWrap:'wrap' }}>
+                {viewImages.images.map((img, i) => (
+                  <img key={i} src={img} alt={`thumb-${i}`} onClick={() => setViewIndex(i)}
+                    style={{ width:58, height:58, objectFit:'cover', borderRadius:6, cursor:'pointer',
+                      border: i === viewIndex ? '2px solid #e85d04' : '2px solid transparent',
+                      opacity: i === viewIndex ? 1 : 0.55, transition:'0.15s' }} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
       {editShipment && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
           <div style={{ background:'white', borderRadius:14, padding:'2rem', width:'100%', maxWidth:560, boxShadow:'0 20px 60px rgba(0,0,0,0.3)' }}>
@@ -329,7 +457,9 @@ const AdminDashboard = () => {
               <button onClick={() => setEditShipment(null)} style={{ background:'transparent', border:'none', fontSize:'1.4rem', cursor:'pointer', color:'#9ca3af' }}>✕</button>
             </div>
             {editMsg && (
-              <div style={{ marginBottom:'1rem', padding:'0.7rem 1rem', background: editMsg.startsWith('✅') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)', borderRadius:6, color: editMsg.startsWith('✅') ? '#22c55e' : '#ef4444', fontSize:'0.83rem' }}>
+              <div style={{ marginBottom:'1rem', padding:'0.7rem 1rem',
+                background: editMsg.startsWith('Saved') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)',
+                borderRadius:6, color: editMsg.startsWith('Saved') ? '#22c55e' : '#ef4444', fontSize:'0.83rem' }}>
                 {editMsg}
               </div>
             )}
@@ -347,8 +477,12 @@ const AdminDashboard = () => {
                 </select>
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:'0.35rem' }}>
-                <label style={labelStyle}>Date</label>
-                <input type="date" value={editShipment.date} onChange={e => setEditShipment({...editShipment,date:e.target.value})} style={inputStyle} />
+                <label style={labelStyle}>Dispatch Date</label>
+                <input type="date" value={editShipment.dispatchDate} onChange={e => setEditShipment({...editShipment,dispatchDate:e.target.value})} style={inputStyle} />
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:'0.35rem' }}>
+                <label style={labelStyle}>Expected Delivery Date</label>
+                <input type="date" value={editShipment.expectedDeliveryDate} onChange={e => setEditShipment({...editShipment,expectedDeliveryDate:e.target.value})} style={inputStyle} min={editShipment.dispatchDate || undefined} />
               </div>
             </div>
             <div style={{ marginTop:'1.5rem', display:'flex', gap:'0.75rem' }}>
@@ -362,7 +496,147 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* ── Top Bar ── */}
+      {/* Upload Image Modal */}
+      {uploadTarget && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:'1rem' }}>
+          <div style={{ background:'white', borderRadius:14, padding:'2rem', width:'100%', maxWidth:480, boxShadow:'0 20px 60px rgba(0,0,0,0.3)', maxHeight:'90vh', overflowY:'auto' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'0.4rem' }}>
+              <h3 style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.5rem', color:'#0a1628', margin:0 }}>Shipment Image</h3>
+              <button onClick={closeUploadModal} style={{ background:'transparent', border:'none', fontSize:'1.4rem', cursor:'pointer', color:'#9ca3af' }}>✕</button>
+            </div>
+            <div style={{ fontSize:'0.78rem', color:'#9ca3af', marginBottom:'1.4rem' }}>
+              CN <span style={{ fontFamily:'monospace', color:'#0a1628', fontWeight:700 }}>{uploadTarget.trackingId}</span> — Delivered
+            </div>
+
+            {uploadMsg && (
+              <div style={{ marginBottom:'1rem', padding:'0.7rem 1rem',
+                background: uploadMsg.startsWith('Image uploaded') || uploadMsg.startsWith('Image removed') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)',
+                borderRadius:6,
+                color: uploadMsg.startsWith('Image uploaded') || uploadMsg.startsWith('Image removed') ? '#22c55e' : '#ef4444',
+                fontSize:'0.83rem' }}>
+                {uploadMsg}
+              </div>
+            )}
+
+            {existingImages.length > 0 && (
+              <div style={{ marginBottom:'1.4rem' }}>
+                <div style={{ fontSize:'0.72rem', color:'#6b7280', fontWeight:600, textTransform:'uppercase', letterSpacing:0.5, marginBottom:'0.6rem' }}>
+                  Uploaded Image
+                </div>
+                {existingImages.map(img => (
+                  <div key={img._id} style={{ display:'flex', gap:'0.9rem', alignItems:'center', background:'#fafafa', border:'1px solid #e8e4dc', borderRadius:10, padding:'0.75rem', marginBottom:'0.5rem' }}>
+                    <div
+                      onClick={() => { setViewImages({ trackingId: uploadTarget.trackingId, images: [resolveImageUrl(img.url)] }); setViewIndex(0); }}
+                      style={{ position:'relative', width:72, height:72, flexShrink:0, borderRadius:8, overflow:'hidden', border:'1px solid #e8e4dc', cursor:'pointer', boxShadow:'0 1px 4px rgba(0,0,0,0.08)' }}
+                      title="Click to preview">
+                      <img src={resolveImageUrl(img.url)} alt="uploaded"
+                        style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                      <div style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0)', display:'flex', alignItems:'center', justifyContent:'center', transition:'background 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,0,0,0.28)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(0,0,0,0)'}>
+                        <span style={{ color:'white', fontSize:'1.1rem', pointerEvents:'none' }}>🔍</span>
+                      </div>
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:'0.8rem', color:'#0a1628', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {img.originalName || 'Shipment image'}
+                      </div>
+                      <div style={{ fontSize:'0.7rem', color:'#9ca3af', marginTop:2 }}>
+                        Uploaded {img.uploadedAt ? fmtDate(img.uploadedAt) : '—'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteUploadedImage(img._id)}
+                      disabled={deletingImageId === img._id}
+                      style={{ padding:'0.38rem 0.7rem', background:'#fee2e2', border:'1px solid #fca5a5', borderRadius:5,
+                        fontSize:'0.72rem', fontWeight:600, color:'#ef4444',
+                        cursor: deletingImageId === img._id ? 'not-allowed' : 'pointer', whiteSpace:'nowrap',
+                        opacity: deletingImageId === img._id ? 0.6 : 1 }}>
+                      {deletingImageId === img._id ? 'Removing...' : '🗑️ Remove'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {canUploadMore ? (
+              <>
+                <div style={{ fontSize:'0.72rem', color:'#6b7280', fontWeight:600, textTransform:'uppercase', letterSpacing:0.5, marginBottom:'0.6rem' }}>
+                  {existingImages.length === 0 ? 'Upload Image' : 'Replace Image'}
+                </div>
+
+                {!uploadFile ? (
+                  <div
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={e => {
+                      e.preventDefault();
+                      const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
+                      if (file) { if (uploadFile?.preview) URL.revokeObjectURL(uploadFile.preview); setUploadFile({ file, preview: URL.createObjectURL(file), name: file.name }); setUploadMsg(''); }
+                    }}
+                    onClick={() => uploadModalInputRef.current?.click()}
+                    style={{ border:'2px dashed #d4cfc4', borderRadius:10, padding:'1.8rem 1.5rem', textAlign:'center', cursor:'pointer', background:'#fafafa', transition:'border-color 0.2s, background 0.2s', userSelect:'none' }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#e85d04'; e.currentTarget.style.background = '#fff8f2'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#d4cfc4'; e.currentTarget.style.background = '#fafafa'; }}
+                  >
+                    <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(232,93,4,.1)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 0.7rem' }}>
+                      <svg viewBox="0 0 24 24" width="22" height="22" fill="#e85d04">
+                        <path d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"/>
+                      </svg>
+                    </div>
+                    <div style={{ fontSize:'0.84rem', color:'#374151', fontWeight:600, marginBottom:3 }}>
+                      <span style={{ color:'#e85d04' }}>Click to upload</span> or drag and drop
+                    </div>
+                    <div style={{ fontSize:'0.73rem', color:'#9ca3af' }}>POD / delivery photo · JPG, PNG, WEBP</div>
+                    <input ref={uploadModalInputRef} type="file" accept="image/*" onChange={handleUploadFileSelect} style={{ display:'none' }} />
+                  </div>
+                ) : (
+                  <div style={{ display:'flex', gap:'0.9rem', alignItems:'center', background:'#fafafa', border:'1px solid #e8e4dc', borderRadius:10, padding:'0.75rem' }}>
+                    <div style={{ position:'relative', width:72, height:72, flexShrink:0, borderRadius:8, overflow:'hidden', border:'1px solid #e8e4dc', boxShadow:'0 1px 4px rgba(0,0,0,0.08)' }}>
+                      <img src={uploadFile.preview} alt={uploadFile.name} style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:'0.83rem', color:'#0a1628', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{uploadFile.name}</div>
+                      <div style={{ fontSize:'0.72rem', color:'#9ca3af', marginTop:2 }}>{(uploadFile.file.size / 1024 / 1024).toFixed(2)} MB</div>
+                      <button onClick={() => uploadModalInputRef.current?.click()}
+                        style={{ marginTop:6, padding:'0.25rem 0.6rem', background:'#f4f1ec', border:'1px solid #e8e4dc', borderRadius:4, fontSize:'0.7rem', color:'#6b7280', cursor:'pointer', fontWeight:600 }}>
+                        Choose different image
+                      </button>
+                    </div>
+                    <button onClick={() => { URL.revokeObjectURL(uploadFile.preview); setUploadFile(null); }}
+                      style={{ padding:'0.38rem 0.7rem', background:'#fee2e2', border:'1px solid #fca5a5', borderRadius:5, fontSize:'0.72rem', fontWeight:600, color:'#ef4444', cursor:'pointer', whiteSpace:'nowrap' }}>
+                      Remove
+                    </button>
+                    <input ref={uploadModalInputRef} type="file" accept="image/*" onChange={handleUploadFileSelect} style={{ display:'none' }} />
+                  </div>
+                )}
+
+                <div style={{ marginTop:'1.2rem', display:'flex', gap:'0.75rem' }}>
+                  <button onClick={handleUploadImageSubmit} disabled={!uploadFile || uploadingImage}
+                    style={{ background: (!uploadFile || uploadingImage) ? '#9ca3af' : '#e85d04', color:'white', border:'none', padding:'0.65rem 1.4rem', borderRadius:4, cursor: (!uploadFile || uploadingImage) ? 'not-allowed' : 'pointer', fontWeight:600, fontSize:'0.85rem' }}>
+                    {uploadingImage ? 'Uploading...' : 'Upload Image'}
+                  </button>
+                  <button onClick={closeUploadModal} style={{ background:'#f4f1ec', color:'#6b7280', border:'1px solid #e8e4dc', padding:'0.65rem 1.2rem', borderRadius:4, cursor:'pointer', fontSize:'0.85rem' }}>
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ background:'#fff8f2', border:'1px solid rgba(232,93,4,.25)', borderRadius:8, padding:'0.9rem 1rem', fontSize:'0.82rem', color:'#92400e' }}>
+                  Maximum 1 image per shipment. Remove the existing image to upload a new one.
+                </div>
+                <div style={{ marginTop:'1.2rem' }}>
+                  <button onClick={closeUploadModal} style={{ background:'#f4f1ec', color:'#6b7280', border:'1px solid #e8e4dc', padding:'0.65rem 1.2rem', borderRadius:4, cursor:'pointer', fontSize:'0.85rem' }}>
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Top Bar */}
       <div style={{ background:'#0a1628', borderBottom:'3px solid #e85d04', padding:'0 2rem', height:64, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.5rem', color:'white', letterSpacing:1 }}>
           Rahul <span style={{ color:'#e85d04' }}>Enterprise</span> — Admin
@@ -378,7 +652,7 @@ const AdminDashboard = () => {
 
       <div style={{ display:'flex', flex:1 }}>
 
-        {/* ── Sidebar ── */}
+        {/* Sidebar */}
         <div style={{ width:220, background:'#122040', padding:'1.5rem 1rem', display:'flex', flexDirection:'column', gap:'0.5rem' }}>
           {[
             { id:'shipments', label:'📦 Shipments' },
@@ -392,15 +666,12 @@ const AdminDashboard = () => {
           ))}
         </div>
 
-        {/* ── Main Content ── */}
+        {/* Main Content */}
         <div style={{ flex:1, padding:'2rem', overflowY:'auto' }}>
 
-          {/* ══════════════════════════════
-              SHIPMENTS TAB
-          ══════════════════════════════ */}
+          {/* SHIPMENTS TAB */}
           {tab === 'shipments' && (
             <div>
-              {/* Date badge */}
               <div style={{ marginBottom:'0.75rem', display:'flex', alignItems:'center', gap:'0.5rem' }}>
                 <span style={{ fontSize:'0.72rem', color:'#9ca3af', textTransform:'uppercase', letterSpacing:1 }}>
                   {new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
@@ -409,15 +680,14 @@ const AdminDashboard = () => {
                 {deleting && <span style={{ fontSize:'0.65rem', color:'#ef4444', background:'#fee2e2', padding:'2px 8px', borderRadius:10 }}>Deleting...</span>}
               </div>
 
-              {/* Stats — Aaj ka */}
-              <div style={{ fontSize:'0.7rem', color:'#9ca3af', textTransform:'uppercase', letterSpacing:1, marginBottom:'0.5rem', fontWeight:600 }}>📅 Today</div>
+              <div style={{ fontSize:'0.7rem', color:'#9ca3af', textTransform:'uppercase', letterSpacing:1, marginBottom:'0.5rem', fontWeight:600 }}>Today</div>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:'0.75rem', marginBottom:'1.25rem' }}>
                 {[
-                  ['Today Pickups',    todayStats.total,    '#e85d04'],
-                  ['Delivered',        todayStats.delivered, '#22c55e'],
-                  ['In Transit',       todayStats.inTransit, '#3b82f6'],
-                  ['Dedicated Veh.',   todayStats.dvActive,  '#8b5cf6'],
-                  ['Pending',          todayStats.pending,   '#f48c06'],
+                  ['Today Pickups',  todayStats.total,    '#e85d04'],
+                  ['Delivered',      todayStats.delivered,'#22c55e'],
+                  ['In Transit',     todayStats.inTransit,'#3b82f6'],
+                  ['Dedicated Veh.', todayStats.dvActive, '#8b5cf6'],
+                  ['Pending',        todayStats.pending,  '#f48c06'],
                 ].map(([l,v,c]) => (
                   <div key={l} style={{ background:'white', border:'1px solid #e8e4dc', borderRadius:10, padding:'1rem' }}>
                     <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.8rem', color:c, lineHeight:1 }}>{v}</div>
@@ -426,15 +696,14 @@ const AdminDashboard = () => {
                 ))}
               </div>
 
-              {/* Stats — All Time */}
-              <div style={{ fontSize:'0.7rem', color:'#9ca3af', textTransform:'uppercase', letterSpacing:1, marginBottom:'0.5rem', fontWeight:600 }}>📦 Total (All Time)</div>
+              <div style={{ fontSize:'0.7rem', color:'#9ca3af', textTransform:'uppercase', letterSpacing:1, marginBottom:'0.5rem', fontWeight:600 }}>Total (All Time)</div>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:'0.75rem', marginBottom:'2rem' }}>
                 {[
-                  ['Total Shipments', allStats.total,    '#e85d04'],
-                  ['Delivered',       allStats.delivered, '#22c55e'],
-                  ['In Transit',      allStats.inTransit, '#3b82f6'],
-                  ['Dedicated Veh.',  allStats.dvActive,  '#8b5cf6'],
-                  ['Pending',         allStats.pending,   '#f48c06'],
+                  ['Total Shipments',allStats.total,    '#e85d04'],
+                  ['Delivered',      allStats.delivered,'#22c55e'],
+                  ['In Transit',     allStats.inTransit,'#3b82f6'],
+                  ['Dedicated Veh.', allStats.dvActive, '#8b5cf6'],
+                  ['Pending',        allStats.pending,  '#f48c06'],
                 ].map(([l,v,c]) => (
                   <div key={l} style={{ background:'white', border:'1px solid #e8e4dc', borderRadius:10, padding:'1rem' }}>
                     <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.8rem', color:c, lineHeight:1 }}>{v}</div>
@@ -443,14 +712,12 @@ const AdminDashboard = () => {
                 ))}
               </div>
 
-              {/* Heading + controls */}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem', flexWrap:'wrap', gap:'0.75rem' }}>
                 <div>
                   <h2 style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.8rem', color:'#0a1628', margin:0 }}>Shipments</h2>
                   <span style={{ fontSize:'0.75rem', color:'#9ca3af' }}>{filteredShipments.length} shipment{filteredShipments.length!==1?'s':''} found</span>
                 </div>
                 <div style={{ display:'flex', gap:'0.75rem', alignItems:'center', flexWrap:'wrap' }}>
-                  {/* Search */}
                   <div style={{ position:'relative' }}>
                     <span style={{ position:'absolute', left:'0.75rem', top:'50%', transform:'translateY(-50%)', color:'#9ca3af', pointerEvents:'none' }}>🔍</span>
                     <input placeholder="CN / Challan search..." value={shipmentSearch} onChange={e => setShipmentSearch(e.target.value)} style={searchStyle} />
@@ -459,13 +726,11 @@ const AdminDashboard = () => {
                         style={{ position:'absolute', right:'0.6rem', top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', color:'#9ca3af', fontSize:'1rem' }}>✕</button>
                     )}
                   </div>
-                  {/* Delete All */}
                   {filteredShipments.length > 0 && (
                     <button onClick={handleDeleteAllFiltered} disabled={deleting} style={deleteAllBtnStyle}>
                       🗑️ Delete All ({filteredShipments.length})
                     </button>
                   )}
-                  {/* Add */}
                   <button onClick={() => { setShowAddForm(!showAddForm); setAddMsg(''); }}
                     style={{ background:'#e85d04', color:'white', border:'none', padding:'0.6rem 1.2rem', borderRadius:4, cursor:'pointer', fontWeight:600, fontSize:'0.85rem', whiteSpace:'nowrap' }}>
                     + Add Shipment
@@ -473,23 +738,25 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
-              {/* Status filter pills */}
               <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap', marginBottom:'1.2rem' }}>
                 {['all','Booked','Picked Up','In Transit','Out for Delivery','Delivered','Failed','Returned'].map(st => (
                   <button key={st} onClick={() => setStatusFilter(st)} style={filterBtnStyle(statusFilter===st)}>
-                    {st==='all' ? 'All' : st}
+                    {st === 'all' ? 'All' : st}
                   </button>
                 ))}
               </div>
 
-              {/* Add message */}
               {addMsg && (
-                <div style={{ marginBottom:'1rem', padding:'0.8rem 1rem', background: addMsg.startsWith('✅') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)', border:`1px solid ${addMsg.startsWith('✅')?'rgba(34,197,94,.3)':'rgba(239,68,68,.3)'}`, borderRadius:6, color: addMsg.startsWith('✅') ? '#22c55e' : '#fca5a5', fontSize:'0.85rem' }}>
+                <div style={{ marginBottom:'1rem', padding:'0.8rem 1rem',
+                  background: addMsg.startsWith('Shipment') ? 'rgba(34,197,94,.1)' : addMsg.includes('...') ? 'rgba(59,130,246,.1)' : 'rgba(239,68,68,.1)',
+                  border:`1px solid ${addMsg.startsWith('Shipment') ? 'rgba(34,197,94,.3)' : addMsg.includes('...') ? 'rgba(59,130,246,.3)' : 'rgba(239,68,68,.3)'}`,
+                  borderRadius:6,
+                  color: addMsg.startsWith('Shipment') ? '#22c55e' : addMsg.includes('...') ? '#3b82f6' : '#fca5a5',
+                  fontSize:'0.85rem' }}>
                   {addMsg}
                 </div>
               )}
 
-              {/* Add Form */}
               {showAddForm && (
                 <div style={{ background:'white', border:'1px solid #e8e4dc', borderRadius:12, padding:'1.5rem', marginBottom:'1.5rem' }}>
                   <h3 style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.4rem', color:'#0a1628', marginBottom:'1rem' }}>New Shipment</h3>
@@ -512,16 +779,20 @@ const AdminDashboard = () => {
                       </select>
                     </div>
                     <div style={{ display:'flex', flexDirection:'column', gap:'0.35rem' }}>
-                      <label style={labelStyle}>Date *</label>
-                      <input type="date" value={newShipment.date} onChange={e => setNewShipment({...newShipment,date:e.target.value})} style={inputStyle} />
+                      <label style={labelStyle}>Dispatch Date *</label>
+                      <input type="date" value={newShipment.dispatchDate} onChange={e => setNewShipment({...newShipment,dispatchDate:e.target.value})} style={inputStyle} />
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'0.35rem' }}>
+                      <label style={labelStyle}>Expected Delivery Date</label>
+                      <input type="date" value={newShipment.expectedDeliveryDate} onChange={e => setNewShipment({...newShipment,expectedDeliveryDate:e.target.value})} style={inputStyle} min={newShipment.dispatchDate || undefined} />
                     </div>
                   </div>
                   <div style={{ marginTop:'1.2rem', display:'flex', gap:'0.75rem' }}>
-                    <button onClick={handleAddShipment}
-                      style={{ background:'#e85d04', color:'white', border:'none', padding:'0.65rem 1.4rem', borderRadius:4, cursor:'pointer', fontWeight:600, fontSize:'0.85rem' }}>
-                      Create Shipment
+                    <button onClick={handleAddShipment} disabled={uploading}
+                      style={{ background: uploading ? '#9ca3af' : '#e85d04', color:'white', border:'none', padding:'0.65rem 1.4rem', borderRadius:4, cursor: uploading ? 'not-allowed' : 'pointer', fontWeight:600, fontSize:'0.85rem' }}>
+                      {uploading ? 'Creating...' : 'Create Shipment'}
                     </button>
-                    <button onClick={() => { setShowAddForm(false); setAddMsg(''); }}
+                    <button onClick={resetAddForm}
                       style={{ background:'#f4f1ec', color:'#6b7280', border:'1px solid #e8e4dc', padding:'0.65rem 1.2rem', borderRadius:4, cursor:'pointer', fontSize:'0.85rem' }}>
                       Cancel
                     </button>
@@ -535,7 +806,7 @@ const AdminDashboard = () => {
                   <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.82rem' }}>
                     <thead>
                       <tr style={{ background:'#f4f1ec' }}>
-                        {['CN Number','Challan No.','Date','Route','Service','Status','Actions'].map(h => (
+                        {['CN Number','Challan No.','Dispatch Date','Exp. Delivery','Route','Service','Status','Actions'].map(h => (
                           <th key={h} style={{ padding:'0.9rem 1rem', textAlign:'left', fontWeight:700, color:'#0a1628', fontSize:'0.75rem', textTransform:'uppercase', letterSpacing:0.5, whiteSpace:'nowrap' }}>{h}</th>
                         ))}
                       </tr>
@@ -543,9 +814,65 @@ const AdminDashboard = () => {
                     <tbody>
                       {filteredShipments.map((s,i) => (
                         <tr key={s._id} style={{ borderTop:'1px solid #f4f1ec', background: i%2===0 ? 'white' : '#fafafa' }}>
-                          <td style={{ padding:'0.8rem 1rem', fontFamily:'monospace', fontWeight:600, color:'#0a1628', whiteSpace:'nowrap' }}>{s.trackingId}</td>
+
+                          {/* CN Number + image thumbnail */}
+                          <td style={{ padding:'0.8rem 1rem', fontFamily:'monospace', fontWeight:600, color:'#0a1628', whiteSpace:'nowrap' }}>
+                            <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+                              {s.trackingId}
+                              {s.images?.length > 0 ? (
+                                /* ── Professional image chip ── */
+                                <button
+                                  onClick={() => openViewer(s)}
+                                  title="View delivery photo"
+                                  style={{
+                                    display:'inline-flex', alignItems:'center', gap:5,
+                                    background:'linear-gradient(135deg,rgba(34,197,94,.12),rgba(34,197,94,.06))',
+                                    border:'1px solid rgba(34,197,94,.35)',
+                                    borderRadius:6, padding:'3px 8px 3px 4px',
+                                    cursor:'pointer', transition:'all 0.15s',
+                                  }}
+                                  onMouseEnter={e => { e.currentTarget.style.background='linear-gradient(135deg,rgba(34,197,94,.22),rgba(34,197,94,.12))'; e.currentTarget.style.borderColor='rgba(34,197,94,.6)'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.background='linear-gradient(135deg,rgba(34,197,94,.12),rgba(34,197,94,.06))'; e.currentTarget.style.borderColor='rgba(34,197,94,.35)'; }}
+                                >
+                                  {/* Mini thumbnail */}
+                                  <div style={{ width:20, height:20, borderRadius:3, overflow:'hidden', flexShrink:0, border:'1px solid rgba(34,197,94,.3)' }}>
+                                    <img
+                                      src={resolveImageUrl(s.images[0].url)}
+                                      alt="thumb"
+                                      style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }}
+                                    />
+                                  </div>
+                                  <span style={{ fontSize:'0.65rem', fontWeight:700, color:'#16a34a', letterSpacing:0.2 }}>
+                                    POD
+                                  </span>
+                                  {/* Green dot */}
+                                  <span style={{ width:5, height:5, borderRadius:'50%', background:'#22c55e', display:'inline-block', flexShrink:0 }} />
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+
                           <td style={{ padding:'0.8rem 1rem', fontFamily:'monospace', color:'#6b7280', whiteSpace:'nowrap' }}>{s.challanNumber||'—'}</td>
                           <td style={{ padding:'0.8rem 1rem', color:'#6b7280', whiteSpace:'nowrap' }}>{fmtDate(s.createdAt)}</td>
+
+                          {/* Expected Delivery */}
+                          <td style={{ padding:'0.8rem 1rem', whiteSpace:'nowrap' }}>
+                            {s.estimatedDelivery ? (
+                              <span style={{
+                                display:'inline-flex', alignItems:'center', gap:4,
+                                fontSize:'0.78rem', fontWeight:600,
+                                color: new Date(s.estimatedDelivery) < new Date() && s.status !== 'Delivered' ? '#ef4444' : '#0a1628',
+                              }}>
+                                {new Date(s.estimatedDelivery) < new Date() && s.status !== 'Delivered' && (
+                                  <span title="Overdue" style={{ fontSize:'0.7rem' }}>⚠️</span>
+                                )}
+                                {fmtDate(s.estimatedDelivery)}
+                              </span>
+                            ) : (
+                              <span style={{ color:'#d1d5db', fontSize:'0.78rem' }}>—</span>
+                            )}
+                          </td>
+
                           <td style={{ padding:'0.8rem 1rem', color:'#6b7280', whiteSpace:'nowrap' }}>{s.origin} → {s.destination}</td>
                           <td style={{ padding:'0.8rem 1rem', color:'#6b7280', whiteSpace:'nowrap' }}>{s.serviceType}</td>
                           <td style={{ padding:'0.8rem 1rem', whiteSpace:'nowrap' }}>
@@ -560,6 +887,57 @@ const AdminDashboard = () => {
                                 <option value="">Change Status</option>
                                 {['Picked Up','In Transit','Out for Delivery','Delivered','Failed','Returned'].map(st=><option key={st}>{st}</option>)}
                               </select>
+
+                              {/* ── Upload Image button ── */}
+                              <button
+                                onClick={() => openUploadModal(s)}
+                                disabled={s.status !== 'Delivered'}
+                                title={
+                                  s.status !== 'Delivered'
+                                    ? 'Available once status is Delivered'
+                                    : s.images?.length > 0
+                                      ? 'Manage delivery photo'
+                                      : 'Upload delivery photo'
+                                }
+                                style={{
+                                  display:'inline-flex', alignItems:'center', gap:4,
+                                  padding:'0.35rem 0.55rem', borderRadius:4, fontSize:'0.72rem', fontWeight:600,
+                                  whiteSpace:'nowrap', transition:'all 0.15s',
+                                  background: s.status !== 'Delivered'
+                                    ? '#f4f1ec'
+                                    : s.images?.length > 0
+                                      ? 'rgba(34,197,94,.12)'
+                                      : 'rgba(232,93,4,.1)',
+                                  border: s.status !== 'Delivered'
+                                    ? '1px solid #e8e4dc'
+                                    : s.images?.length > 0
+                                      ? '1px solid rgba(34,197,94,.35)'
+                                      : '1px solid rgba(232,93,4,.3)',
+                                  color: s.status !== 'Delivered'
+                                    ? '#c4bfb8'
+                                    : s.images?.length > 0
+                                      ? '#16a34a'
+                                      : '#c2410c',
+                                  cursor: s.status !== 'Delivered' ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                {s.images?.length > 0 ? (
+                                  <>
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                                      <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                                    </svg>
+                                    POD
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                                      <path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/>
+                                    </svg>
+                                    Upload
+                                  </>
+                                )}
+                              </button>
+
                               <button onClick={() => openEdit(s)}
                                 style={{ padding:'0.35rem 0.6rem', background:'#f4f1ec', border:'1px solid #e8e4dc', borderRadius:4, fontSize:'0.72rem', cursor:'pointer', color:'#0a1628', fontWeight:600 }}>
                                 ✏️
@@ -574,7 +952,7 @@ const AdminDashboard = () => {
                       ))}
                       {filteredShipments.length === 0 && (
                         <tr>
-                          <td colSpan={7} style={{ padding:'2.5rem', textAlign:'center', color:'#6b7280' }}>
+                          <td colSpan={8} style={{ padding:'2.5rem', textAlign:'center', color:'#6b7280' }}>
                             {shipmentSearch ? `No results for "${shipmentSearch}".` : statusFilter!=='all' ? `No "${statusFilter}" shipments found.` : 'No shipments found.'}
                           </td>
                         </tr>
@@ -586,25 +964,20 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {/* ══════════════════════════════
-              MIS TAB
-          ══════════════════════════════ */}
+          {/* MIS TAB */}
           {tab === 'mis' && (
             <div>
-              {/* Heading row */}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'1.2rem', flexWrap:'wrap', gap:'0.75rem' }}>
                 <div>
                   <h2 style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.8rem', color:'#0a1628', margin:'0 0 0.3rem 0' }}>Delivered Shipments Report</h2>
                   <span style={{ fontSize:'0.75rem', color:'#9ca3af' }}>{filteredDelivered.length} delivered shipments</span>
                 </div>
                 <div style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap', alignItems:'center' }}>
-                  {/* Delete All Delivered */}
                   {filteredDelivered.length > 0 && (
                     <button onClick={handleDeleteAllDelivered} disabled={deleting} style={deleteAllBtnStyle}>
                       🗑️ Delete All ({filteredDelivered.length})
                     </button>
                   )}
-                  {/* Download Excel */}
                   <button onClick={downloadExcel}
                     style={{ display:'flex', alignItems:'center', gap:'0.5rem', background:'#16a34a', color:'white', border:'none', padding:'0.6rem 1.2rem', borderRadius:6, cursor:'pointer', fontWeight:600, fontSize:'0.85rem', whiteSpace:'nowrap' }}>
                     📥 Download 1 Year Excel
@@ -612,7 +985,6 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
-              {/* Filter + Search */}
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem', flexWrap:'wrap', gap:'0.75rem' }}>
                 <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap' }}>
                   {[['7d','Last 7 Days'],['30d','Last 30 Days'],['6m','Last 6 Months'],['all','All Time']].map(([val,lbl]) => (
@@ -641,13 +1013,11 @@ const AdminDashboard = () => {
                   : new Date(dateKey+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
                 return (
                   <div key={dateKey} style={{ marginBottom:'2rem' }}>
-                    {/* Date group header */}
                     <div style={{ display:'flex', alignItems:'center', gap:'0.75rem', marginBottom:'0.75rem', flexWrap:'wrap' }}>
                       <span style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.1rem', color:'#0a1628' }}>{displayDate}</span>
                       <span style={{ background:'#22c55e22', color:'#22c55e', padding:'2px 10px', borderRadius:20, fontSize:'0.72rem', fontWeight:700 }}>
                         {group.length} Delivered
                       </span>
-                      {/* Delete this date's group */}
                       <button
                         onClick={async () => {
                           if (!window.confirm(`Delete all ${group.length} shipments from ${displayDate}?`)) return;
@@ -668,7 +1038,7 @@ const AdminDashboard = () => {
                       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.82rem' }}>
                         <thead>
                           <tr style={{ background:'#f4f1ec' }}>
-                            {['CN Number','Challan No.','Booking Date','Route','Service','Status','Delete'].map(h => (
+                            {['CN Number','Challan No.','Dispatch Date','Exp. Delivery','Route','Service','Status','Delete'].map(h => (
                               <th key={h} style={{ padding:'0.75rem 1rem', textAlign:'left', fontWeight:700, color:'#0a1628', fontSize:'0.72rem', textTransform:'uppercase', letterSpacing:0.5, whiteSpace:'nowrap' }}>{h}</th>
                             ))}
                           </tr>
@@ -676,9 +1046,39 @@ const AdminDashboard = () => {
                         <tbody>
                           {group.map((s,i) => (
                             <tr key={s._id} style={{ borderTop:'1px solid #f4f1ec', background: i%2===0 ? 'white' : '#fafafa' }}>
-                              <td style={{ padding:'0.75rem 1rem', fontFamily:'monospace', fontWeight:600, color:'#0a1628' }}>{s.trackingId}</td>
+                              <td style={{ padding:'0.75rem 1rem', fontFamily:'monospace', fontWeight:600, color:'#0a1628' }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+                                  {s.trackingId}
+                                  {s.images?.length > 0 && (
+                                    <button
+                                      onClick={() => openViewer(s)}
+                                      title="View delivery photo"
+                                      style={{
+                                        display:'inline-flex', alignItems:'center', gap:5,
+                                        background:'linear-gradient(135deg,rgba(34,197,94,.12),rgba(34,197,94,.06))',
+                                        border:'1px solid rgba(34,197,94,.35)',
+                                        borderRadius:6, padding:'3px 8px 3px 4px',
+                                        cursor:'pointer',
+                                      }}
+                                    >
+                                      <div style={{ width:20, height:20, borderRadius:3, overflow:'hidden', flexShrink:0, border:'1px solid rgba(34,197,94,.3)' }}>
+                                        <img src={resolveImageUrl(s.images[0].url)} alt="thumb"
+                                          style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                                      </div>
+                                      <span style={{ fontSize:'0.65rem', fontWeight:700, color:'#16a34a' }}>POD</span>
+                                      <span style={{ width:5, height:5, borderRadius:'50%', background:'#22c55e', display:'inline-block' }} />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
                               <td style={{ padding:'0.75rem 1rem', fontFamily:'monospace', color:'#6b7280' }}>{s.challanNumber||'—'}</td>
                               <td style={{ padding:'0.75rem 1rem', color:'#6b7280', whiteSpace:'nowrap' }}>{fmtDate(s.createdAt)}</td>
+                              <td style={{ padding:'0.75rem 1rem', whiteSpace:'nowrap' }}>
+                                {s.estimatedDelivery
+                                  ? <span style={{ fontSize:'0.78rem', fontWeight:600, color:'#0a1628' }}>{fmtDate(s.estimatedDelivery)}</span>
+                                  : <span style={{ color:'#d1d5db', fontSize:'0.78rem' }}>—</span>
+                                }
+                              </td>
                               <td style={{ padding:'0.75rem 1rem', color:'#6b7280', whiteSpace:'nowrap' }}>{s.origin} → {s.destination}</td>
                               <td style={{ padding:'0.75rem 1rem', color:'#6b7280' }}>{s.serviceType}</td>
                               <td style={{ padding:'0.75rem 1rem' }}>
@@ -701,9 +1101,7 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {/* ══════════════════════════════
-              SETTINGS TAB
-          ══════════════════════════════ */}
+          {/* SETTINGS TAB */}
           {tab === 'settings' && (
             <div>
               <h2 style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.8rem', color:'#0a1628', marginBottom:'0.4rem' }}>Settings</h2>

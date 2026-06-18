@@ -118,6 +118,20 @@ const GlobalStyles = () => (
       justify-content: center; flex-shrink: 0; font-size: 1.1rem;
     }
 
+    /* ── DOWNLOAD PDF BUTTON ── */
+    .re-download-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; background: rgba(255,255,255,0.06);
+      border: 1.5px solid rgba(255,255,255,0.18);
+      color: white; padding: 0.7rem; border-radius: 6px;
+      font-weight: 600; font-size: 0.82rem; cursor: pointer;
+      font-family: inherit; transition: all 0.2s; margin-top: 0.6rem;
+    }
+    .re-download-btn:hover:not(:disabled) {
+      background: rgba(232,93,4,0.18); border-color: rgba(232,93,4,0.5);
+    }
+    .re-download-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
     @media (max-width: 900px) {
       .hero-grid     { grid-template-columns: 1fr !important; }
       .two-col       { grid-template-columns: 1fr !important; gap: 2rem !important; }
@@ -147,6 +161,456 @@ const H2 = ({ c, light }) => (
 const Sub = ({ c, light }) => (
   <p style={{ color: light?'#9ca3af':'#6b7280', fontSize:'1rem', lineHeight:1.75, maxWidth:560 }}>{c}</p>
 );
+
+// Resolve a stored image URL to a full URL served by the backend
+const resolveImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http')) return url;
+  const base = (process.env.REACT_APP_API_URL || '').replace(/\/api$/, '');
+  return `${base}${url}`;
+};
+
+const fmtDateTime = (val) => {
+  if (!val) return '—';
+  const d = new Date(val);
+  if (isNaN(d)) return '—';
+  return d.toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+};
+
+const fmtDateOnly = (val) => {
+  if (!val) return '—';
+  const d = new Date(val);
+  if (isNaN(d)) return '—';
+  return d.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+};
+
+/* ─── PDF GENERATION (client-side, via jsPDF loaded from CDN) ──────
+   Loads jsPDF only once and caches the promise so multiple buttons
+   on the page don't each inject the script separately.
+─────────────────────────────────────────────────────────────────── */
+let jsPDFLoaderPromise = null;
+const loadJsPDF = () => {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+  if (jsPDFLoaderPromise) return jsPDFLoaderPromise;
+  jsPDFLoaderPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-re-jspdf]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.jspdf.jsPDF));
+      existing.addEventListener('error', reject);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    script.async = true;
+    script.dataset.reJspdf = 'true';
+    script.onload = () => resolve(window.jspdf.jsPDF);
+    script.onerror = () => reject(new Error('Failed to load PDF library.'));
+    document.body.appendChild(script);
+  });
+  return jsPDFLoaderPromise;
+};
+
+// Fetch an image URL and convert it to a base64 data URL (needed for jsPDF embedding)
+const imageUrlToDataURL = (url) => new Promise((resolve) => {
+  const img = new Image();
+  img.crossOrigin = 'Anonymous';
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.92), width: img.naturalWidth, height: img.naturalHeight });
+    } catch (e) {
+      resolve(null); // CORS or canvas tainted — skip embedding image, PDF still generates
+    }
+  };
+  img.onerror = () => resolve(null);
+  img.src = url;
+});
+
+/**
+ * Builds and downloads a PDF containing every shipment detail
+ * (the same data captured in the admin "Add Shipment" form)
+ * plus the uploaded shipment image, if available.
+ */
+const generateShipmentPDF = async (shipment) => {
+  const jsPDFCtor = await loadJsPDF();
+  const doc = new jsPDFCtor({ unit: 'pt', format: 'a4' });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const marginX = 48;
+  let y = 56;
+
+  // ── Header band ──
+  doc.setFillColor(10, 22, 40); // #0a1628
+  doc.rect(0, 0, pageWidth, 86, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text('Rahul Enterprise', marginX, 40);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(232, 93, 4);
+  doc.text('SHIPMENT INFORMATION SHEET', marginX, 60);
+  doc.setTextColor(180, 190, 205);
+  doc.setFontSize(8.5);
+  doc.text(`Generated on ${new Date().toLocaleString('en-IN')}`, marginX, 75);
+
+  y = 116;
+  doc.setTextColor(20, 20, 20);
+
+  // ── Status badge ──
+  const status = shipment.status || 'Booked';
+  const statusColors = {
+    'Delivered':[34,197,94], 'In Transit':[232,93,4], 'Out for Delivery':[59,130,246],
+    'Picked Up':[244,140,6], 'Booked':[156,163,175], 'Failed':[239,68,68], 'Returned':[139,92,246],
+  };
+  const [r,g,b] = statusColors[status] || [156,163,175];
+  doc.setFillColor(r,g,b);
+  doc.roundedRect(marginX, y - 14, 110, 22, 4, 4, 'F');
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text(status.toUpperCase(), marginX + 55, y + 1, { align: 'center' });
+
+  doc.setTextColor(20,20,20);
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(shipment.trackingId || '—', pageWidth - marginX, y + 1, { align: 'right' });
+
+  y += 36;
+  doc.setDrawColor(225, 225, 225);
+  doc.line(marginX, y, pageWidth - marginX, y);
+  y += 26;
+
+  // ── Detail rows helper ──
+  const fieldRow = (label, value) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(110, 110, 110);
+    doc.text(label.toUpperCase(), marginX, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11.5);
+    doc.setTextColor(20, 20, 20);
+    doc.text(String(value ?? '—'), marginX, y + 15);
+    y += 38;
+  };
+
+  const twoColRow = (l1, v1, l2, v2) => {
+    const colWidth = (pageWidth - marginX * 2) / 2;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(110, 110, 110);
+    doc.text(l1.toUpperCase(), marginX, y);
+    doc.text(l2.toUpperCase(), marginX + colWidth, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11.5);
+    doc.setTextColor(20, 20, 20);
+    doc.text(String(v1 ?? '—'), marginX, y + 15);
+    doc.text(String(v2 ?? '—'), marginX + colWidth, y + 15);
+    y += 38;
+  };
+
+  twoColRow('CN Number', shipment.trackingId, 'Challan Number', shipment.challanNumber);
+  twoColRow('Origin', shipment.origin, 'Destination', shipment.destination);
+  twoColRow('Service Type', shipment.serviceType, 'Booking Date', fmtDateTime(shipment.createdAt));
+  if (shipment.weight) twoColRow('Weight', shipment.weight, 'GPS Enabled', shipment.gpsEnabled ? 'Yes' : 'No');
+  if (shipment.description) fieldRow('Description', shipment.description);
+
+  // ── Tracking history ──
+  if (shipment.trackingEvents?.length) {
+    y += 8;
+    doc.setDrawColor(225, 225, 225);
+    doc.line(marginX, y, pageWidth - marginX, y);
+    y += 24;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12.5);
+    doc.setTextColor(20, 20, 20);
+    doc.text('Tracking History', marginX, y);
+    y += 20;
+
+    shipment.trackingEvents.forEach((ev) => {
+      if (y > 740) { doc.addPage(); y = 56; }
+      doc.setFillColor(34, 197, 94);
+      doc.circle(marginX + 4, y - 3, 4, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(20, 20, 20);
+      doc.text(`${ev.status} — ${ev.location || ''}`, marginX + 16, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(120, 120, 120);
+      doc.text(fmtDateTime(ev.timestamp), marginX + 16, y + 13);
+      if (ev.description) {
+        doc.setFontSize(9);
+        doc.setTextColor(90, 90, 90);
+        doc.text(String(ev.description), marginX + 16, y + 25);
+        y += 12;
+      }
+      y += 30;
+    });
+  }
+
+  // ── Shipment image ──
+  const firstImage = shipment.images?.[0];
+  if (firstImage) {
+    if (y > 560) { doc.addPage(); y = 56; }
+    y += 10;
+    doc.setDrawColor(225, 225, 225);
+    doc.line(marginX, y, pageWidth - marginX, y);
+    y += 24;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12.5);
+    doc.setTextColor(20, 20, 20);
+    doc.text('Shipment Image', marginX, y);
+    y += 16;
+
+    const result = await imageUrlToDataURL(resolveImageUrl(firstImage.url));
+    if (result?.dataUrl) {
+      const maxW = pageWidth - marginX * 2;
+      const maxH = 320;
+      let drawW = result.width;
+      let drawH = result.height;
+      const ratio = Math.min(maxW / drawW, maxH / drawH, 1);
+      drawW *= ratio; drawH *= ratio;
+      if (y + drawH > 800) { doc.addPage(); y = 56; }
+      doc.addImage(result.dataUrl, 'JPEG', marginX, y, drawW, drawH);
+      y += drawH + 16;
+    } else {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9.5);
+      doc.setTextColor(150, 150, 150);
+      doc.text('Image could not be embedded (load error).', marginX, y);
+      y += 20;
+    }
+  }
+
+  // ── Footer ──
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(160, 160, 160);
+    doc.text('Rahul Enterprise Logistics — Generated automatically from live tracking data.', marginX, 822);
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - marginX, 822, { align: 'right' });
+  }
+
+  doc.save(`Shipment_${shipment.trackingId || 'Info'}.pdf`);
+};
+
+/**
+ * Downloads the shipment's uploaded photo directly as an image file
+ * (separate from the PDF info sheet). Fetches it as a blob so the
+ * browser saves it rather than navigating to it.
+ */
+const downloadShipmentImage = async (shipment) => {
+  const photo = shipment?.images?.[0];
+  if (!photo) throw new Error('No image available for this shipment.');
+  const url = resolveImageUrl(photo.url);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Could not fetch image.');
+  const blob = await response.blob();
+
+  // Preserve original extension where possible, default to jpg
+  const extMatch = (photo.originalName || photo.url || '').match(/\.(jpg|jpeg|png|webp|gif)$/i);
+  const ext = extMatch ? extMatch[1].toLowerCase() : 'jpg';
+
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = `Shipment_${shipment.trackingId || 'Photo'}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+};
+
+/**
+ * Combined download actions shown inside every tracking result card:
+ * - "Download Info (PDF)" — always available, full shipment info sheet
+ * - "Download Photo" — only shown when the shipment has an uploaded image,
+ *   downloads that exact photo as a standalone image file
+ * Each button manages its own busy/error state independently.
+ */
+const DownloadActions = ({ shipment }) => {
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfErr, setPdfErr] = useState('');
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgErr, setImgErr] = useState('');
+
+  const hasPhoto = !!shipment?.images?.[0];
+
+  const handlePdfClick = async () => {
+    if (!shipment) return;
+    setPdfBusy(true); setPdfErr('');
+    try {
+      await generateShipmentPDF(shipment);
+    } catch (e) {
+      console.error('PDF generation failed:', e);
+      setPdfErr('Could not generate PDF. Please try again.');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const handlePhotoClick = async () => {
+    if (!shipment) return;
+    setImgBusy(true); setImgErr('');
+    try {
+      await downloadShipmentImage(shipment);
+    } catch (e) {
+      console.error('Image download failed:', e);
+      setImgErr('Could not download photo. Please try again.');
+    } finally {
+      setImgBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:'0.6rem' }}>
+        
+
+        {hasPhoto && (
+          <button onClick={handlePhotoClick} disabled={imgBusy} className="re-download-btn" style={{ flex:'1 1 0', marginTop: 0 }}>
+            {imgBusy ? (
+              'Downloading…'
+            ) : (
+              <>
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+                  <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+                </svg>
+                Download POD
+              </>
+            )}
+          </button>
+        )}
+      </div>
+      {pdfErr && <div style={{ marginTop:6, fontSize:'0.72rem', color:'#fca5a5' }}>{pdfErr}</div>}
+      {imgErr && <div style={{ marginTop:6, fontSize:'0.72rem', color:'#fca5a5' }}>{imgErr}</div>}
+    </>
+  );
+};
+
+/**
+ * Professional, structured panel showing every shipment detail captured
+ * in the admin "Add Shipment" form — CN/Challan numbers, route, service
+ * type, dispatch & expected delivery dates — plus the uploaded shipment
+ * photo, shown inline (not just downloadable) with a click-to-enlarge
+ * lightbox. Reused across Hero, TrackingSection and SlidingTracker so
+ * every public tracking result looks consistent.
+ */
+const ShipmentDetailCard = ({ shipment, compact = false }) => {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  if (!shipment) return null;
+
+  const photo = shipment.images?.[0];
+  const photoUrl = photo ? resolveImageUrl(photo.url) : null;
+
+  const fields = [
+    { label: 'CN Number', value: shipment.trackingId },
+    { label: 'Challan Number', value: shipment.challanNumber },
+    { label: 'Origin', value: shipment.origin },
+    { label: 'Destination', value: shipment.destination },
+    { label: 'Service Type', value: shipment.serviceType },
+    { label: 'Dispatch Date', value: fmtDateOnly(shipment.createdAt) },
+    { label: 'Expected Delivery', value: shipment.estimatedDelivery ? fmtDateOnly(shipment.estimatedDelivery) : 'To be updated' },
+  ];
+
+  const gap = compact ? 10 : 14;
+  const fontSize = compact ? '0.74rem' : '0.8rem';
+  const labelSize = compact ? '0.62rem' : '0.66rem';
+
+  return (
+    <>
+      <div style={{
+        marginTop: compact ? '0.85rem' : '1.1rem',
+        background: 'rgba(255,255,255,0.035)',
+        border: '1px solid rgba(255,255,255,0.09)',
+        borderRadius: 10,
+        padding: compact ? '0.9rem' : '1.15rem',
+      }}>
+        <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom: compact ? 10 : 14 }}>
+          <svg viewBox="0 0 24 24" width={compact ? 13 : 14} height={compact ? 13 : 14} fill="#e85d04">
+            <path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-2 .89-2 2v11c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/>
+          </svg>
+          <span style={{ fontSize: compact ? '0.72rem' : '0.78rem', fontWeight:700, color:'white', letterSpacing:0.3 }}>Shipment Details</span>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap, marginBottom: photoUrl ? (compact ? 12 : 16) : 0 }}>
+          {fields.map(f => (
+            <div key={f.label}>
+              <div style={{ fontSize: labelSize, color:'#6b7280', textTransform:'uppercase', letterSpacing:0.6, fontWeight:700, marginBottom:2 }}>
+                {f.label}
+              </div>
+              <div style={{ fontSize, color:'#e5e7eb', fontWeight:600, wordBreak:'break-word' }}>
+                {f.value || '—'}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {photoUrl && (
+          <div>
+            <div style={{ fontSize: labelSize, color:'#6b7280', textTransform:'uppercase', letterSpacing:0.6, fontWeight:700, marginBottom:6 }}>
+              Shipment Photo
+            </div>
+            <div
+              onClick={() => setLightboxOpen(true)}
+              style={{
+                position:'relative', borderRadius:8, overflow:'hidden',
+                border:'1px solid rgba(255,255,255,0.12)', cursor:'zoom-in',
+                maxWidth: compact ? 220 : 280, lineHeight:0,
+              }}
+            >
+              <img src={photoUrl} alt="Shipment"
+                style={{ width:'100%', display:'block', maxHeight: compact ? 160 : 200, objectFit:'cover', transition:'transform 0.25s' }}
+                onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.04)'}
+                onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+              />
+              <div style={{
+                position:'absolute', bottom:0, left:0, right:0,
+                background:'linear-gradient(transparent, rgba(0,0,0,0.65))',
+                padding:'16px 8px 6px', display:'flex', alignItems:'center', gap:5,
+              }}>
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="white"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                <span style={{ fontSize:'0.65rem', color:'white', fontWeight:600 }}>Click to enlarge</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {lightboxOpen && photoUrl && (
+        <div
+          onClick={() => setLightboxOpen(false)}
+          style={{
+            position:'fixed', inset:0, zIndex:3000,
+            background:'rgba(5,12,24,0.92)', backdropFilter:'blur(4px)',
+            display:'flex', alignItems:'center', justifyContent:'center', padding:'2rem',
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth:'90vw', maxHeight:'90vh', position:'relative' }}>
+            <img src={photoUrl} alt="Shipment full size"
+              style={{ maxWidth:'90vw', maxHeight:'85vh', objectFit:'contain', borderRadius:10, boxShadow:'0 20px 60px rgba(0,0,0,0.5)' }} />
+            <button
+              onClick={() => setLightboxOpen(false)}
+              style={{
+                position:'absolute', top:-44, right:0, background:'rgba(255,255,255,0.1)',
+                border:'none', color:'white', width:36, height:36, borderRadius:'50%',
+                fontSize:'1.2rem', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+              }}>
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
 
 /* ─── STEP PROGRESS TRACKER ─────────────────────────────────────── */
 const STEPS = ['Booked', 'In Transit', 'Out for Delivery', 'Delivered'];
@@ -339,6 +803,8 @@ const SlidingTracker = () => {
                   GPS Active
                 </div>
               )}
+              <ShipmentDetailCard shipment={result} compact />
+              <DownloadActions shipment={result} />
             </div>
           )}
         </div>
@@ -449,6 +915,8 @@ const Hero = () => {
                   GPS Active
                 </div>
               )}
+              <ShipmentDetailCard shipment={result} compact />
+              <DownloadActions shipment={result} />
               <button onClick={() => { setResult(null); setTid(''); setErr(''); }}
                 style={{ marginTop:'0.75rem', background:'transparent', border:'1px solid rgba(255,255,255,.15)', color:'#9ca3af', padding:'5px 12px', borderRadius:4, fontSize:'0.72rem', cursor:'pointer', width:'100%' }}>
                 ← Track Another
@@ -516,6 +984,8 @@ const TrackingSection = () => {
                     </div>
                   ))}
                 </div>
+                <ShipmentDetailCard shipment={result} />
+                <DownloadActions shipment={result} />
               </div>
             )}
           </div>
@@ -583,7 +1053,7 @@ const WHY = [
   { icon:'📡', title:'Live GPS Every Shipment',  stat:'2 min', statLabel:'Update Interval',    desc:'All DV vehicles carry mandatory GPS devices with live location broadcast — so you always know where your cargo is.' },
   { icon:'🔒', title:'Tamper-Proof Security',    stat:'100%',  statLabel:'Sealed Consignments', desc:'Chain-of-custody documentation, tamper-evident seals, and digital POD at every handoff for zero ambiguity.' },
   { icon:'📊', title:'Daily MIS Intelligence',  stat:'24h',  statLabel:'Report Turnaround',  desc:'Automated daily MIS reports covering volumes, TAT, exceptions, and region-wise performance — straight to your inbox.' },
-  { icon:'🌐', title:'Pan-India Network',        stat:'250+',  statLabel:'Cities Covered',     desc:'Hub & Spoke infrastructure spanning every major metro and tier-2 city, with rapid expansion underway in the North.' },
+  { icon:'🌐', title:'East-India Network',        stat:'250+',  statLabel:'Cities Covered',     desc:'Hub & Spoke infrastructure spanning every major metro and tier-2 city, with rapid expansion underway in the North.' },
   { icon:'🤝', title:'Dedicated Account Manager', stat:'1:1',  statLabel:'Client Support',      desc:'Every client gets a named point of contact who owns your SLA — not a ticket queue.' },
 ];
 
@@ -613,7 +1083,7 @@ const WhyChooseUs = () => (
       <div style={{ marginTop:'3rem', background:'linear-gradient(135deg,rgba(232,93,4,.15),rgba(232,93,4,.05))', border:'1px solid rgba(232,93,4,.25)', borderRadius:14, padding:'2rem 2.5rem', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'1.5rem' }}>
         <div>
           <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.6rem', color:'white', lineHeight:1, marginBottom:6 }}>Ready to upgrade your logistics?</div>
-          <div style={{ fontSize:'0.88rem', color:'#9ca3af' }}>Join 500+ businesses already running on Rahul Enterprise's GE-standard network.</div>
+          <div style={{ fontSize:'0.88rem', color:'#9ca3af' }}>Join 500+ businesses already running on Rahul Enterprise's Standard network.</div>
         </div>
         <a href="#contact" style={{ background:'#e85d04', color:'white', padding:'0.9rem 2.2rem', borderRadius:6, fontWeight:700, textDecoration:'none', fontSize:'0.9rem', whiteSpace:'nowrap' }}>Get a Free Quote →</a>
       </div>
@@ -627,11 +1097,13 @@ const WhyChooseUs = () => (
 const CoverageSection = () => {
   const [activeState, setActiveState] = useState(null);
 
+  // ── UPDATED: Assam added, stats updated to 5 States & 148 Districts ──
   const ZONE_CARDS = [
-    { id:'bihar',     col:'#22c55e', title:'Bihar — Origin Hub',            desc:'Deepest network from Patna HQ. Daily DV runs, dedicated handcarry teams, same-day pickup across all 38 districts.', dis:'38', hub:'Patna' },
-    { id:'jharkhand',  col:'#f59e0b', title:'Jharkhand — Industrial Corridor',desc:'Ranchi, Jamshedpur, Dhanbad steel belt with specialized heavy-cargo handling and mine logistics.',        dis:'24', hub:'Ranchi' },
-    { id:'westbengal', col:'#3b82f6', title:'West Bengal — East Gateway',     desc:'Kolkata East Hub connects to pan-India surface & air lanes. Full coverage across 23 districts.',                  dis:'23', hub:'Kolkata' },
-    { id:'odisha',     col:'#a855f7', title:'Odisha — Coastal Connect',      desc:'Bhubaneswar hub enables coastal freight and e-commerce fulfillment across all 30 districts.',                     dis:'30', hub:'BBSR' },
+    { id:'bihar',     col:'#22c55e', title:'Bihar — Origin Hub',              desc:'Deepest network from Patna HQ. Daily DV runs, dedicated handcarry teams, same-day pickup across all 38 districts.', dis:'38', hub:'Patna' },
+    { id:'jharkhand', col:'#f59e0b', title:'Jharkhand — Industrial Corridor',  desc:'Ranchi, Jamshedpur, Dhanbad steel belt with specialized heavy-cargo handling and mine logistics.',               dis:'24', hub:'Ranchi' },
+    { id:'westbengal',col:'#3b82f6', title:'West Bengal — East Gateway',       desc:'Kolkata East Hub connects to pan-India surface & air lanes. Full coverage across 23 districts.',               dis:'23', hub:'Kolkata' },
+    { id:'odisha',    col:'#a855f7', title:'Odisha — Coastal Connect',         desc:'Bhubaneswar hub enables coastal freight and e-commerce fulfillment across all 30 districts.',                   dis:'30', hub:'BBSR' },
+    { id:'assam',     col:'#06b6d4', title:'Assam — Northeast Gateway',        desc:'Guwahati hub serves as the key transit point for Northeast India, covering all 35 districts with dedicated surface and air connections.', dis:'35', hub:'Guwahati' },
   ];
 
   return (
@@ -640,7 +1112,7 @@ const CoverageSection = () => {
       <div style={{ maxWidth:1200, margin:'0 auto' }}>
         <Tag c="East India Coverage" />
         <H2 c={<>All Major Cities &<br />All Districts</>} light />
-        <Sub c="Complete coverage across West Bengal, Bihar, Jharkhand & Odisha — every district, every city, door to door." light />
+        <Sub c="Complete coverage across West Bengal, Bihar, Jharkhand, Odisha & Assam — every district, every city, door to door." light />
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:16, padding:12, background:'#050e1a', borderRadius:16, marginTop:'3rem' }} className="cover-grid">
 
@@ -654,7 +1126,7 @@ const CoverageSection = () => {
                 GPS Active
               </div>
             </div>
-            <img src="/map.png" alt="India East Zone Coverage Map" style={{ width:'100%', display:'block', objectFit:'cover', objectPosition:'center top' }} />
+            <img src="/map2.png" alt="India East Zone Coverage Map" style={{ width:'100%', display:'block', objectFit:'cover', objectPosition:'center top' }} />
           </div>
 
           {/* ── INFO PANEL ── */}
@@ -678,8 +1150,9 @@ const CoverageSection = () => {
               </div>
             ))}
 
+            {/* ── UPDATED: 5 States, 150 Districts ── */}
             <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginTop:2 }}>
-              {[['4','States','#e85d04'],['115','Districts','#e85d04'],['20+','Cities','#e85d04'],['99.2','On-Time%','#22c55e']].map(([n,l,c]) => (
+              {[['5','States','#e85d04'],['150+','Districts','#e85d04'],['20+','Cities','#e85d04'],['99.2','On-Time%','#22c55e']].map(([n,l,c]) => (
                 <div key={l} style={{ background:'rgba(232,93,4,.08)', border:'1px solid rgba(232,93,4,.2)', borderRadius:9, padding:'8px 4px', textAlign:'center' }}>
                   <div style={{ fontSize:19, fontWeight:800, color:c, lineHeight:1 }}>{n}</div>
                   <div style={{ fontSize:8, color:'#9ca3af', marginTop:2, textTransform:'uppercase', letterSpacing:.5 }}>{l}</div>

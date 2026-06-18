@@ -9,6 +9,12 @@ const TrackingEventSchema = new mongoose.Schema({
   coordinates: { lat: { type: Number }, lng: { type: Number } }
 });
 
+const ShipmentImageSchema = new mongoose.Schema({
+  url:          { type: String, required: true },
+  originalName: { type: String },
+  uploadedAt:   { type: Date, default: Date.now },
+});
+
 const ShipmentSchema = new mongoose.Schema({
   trackingId: {
     type: String, required: true, unique: true,
@@ -33,19 +39,22 @@ const ShipmentSchema = new mongoose.Schema({
     enum: ['Booked','Picked Up','In Transit','Out for Delivery','Delivered','Failed','Returned'],
     default: 'Booked'
   },
-  gpsEnabled: { type: Boolean, default: false },
-  gpsLastUpdate: Date,
+  gpsEnabled:     { type: Boolean, default: false },
+  gpsLastUpdate:  Date,
   gpsCoordinates: { lat: Number, lng: Number },
   trackingEvents: [TrackingEventSchema],
-  podUploaded: { type: Boolean, default: false },
-  podUrl: String, podEmailed: { type: Boolean, default: false },
-  podEmailedAt: Date, estimatedDelivery: Date, deliveredAt: Date,
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  // createdAt manually manage karo — Mongoose timestamps option use nahi kar rahe
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now }
+  podUploaded:  { type: Boolean, default: false },
+  podUrl:       String,
+  podEmailed:   { type: Boolean, default: false },
+  podEmailedAt: Date,
+  dispatchDate:         Date,
+  expectedDeliveryDate: Date,
+  deliveredAt:          Date,
+  createdBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  createdAt:    { type: Date, default: Date.now },
+  updatedAt:    { type: Date, default: Date.now },
+  images: { type: [ShipmentImageSchema], default: [] },
 }, {
-  // Ye important hai — Mongoose ko createdAt override karne deta hai
   strict: false
 });
 

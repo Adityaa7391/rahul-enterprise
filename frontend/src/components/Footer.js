@@ -1,4 +1,6 @@
 import React from 'react';
+import logoImg from './logo.png';
+
 
 const FOOTER_CSS = `
   .re-footer {
@@ -21,9 +23,17 @@ const FOOTER_CSS = `
   .re-footer-brand { flex: 0 0 auto; max-width: 240px; }
   .re-footer-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 1rem; }
   .re-footer-logo-icon {
-    width: 36px; height: 36px; background: #e85d04; border-radius: 6px;
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    border: 2px solid #e85d04;
   }
+  .re-footer-logo-icon img { width: 100%; height: 100%; object-fit: cover; }
   .re-footer-brand-name {
     font-family: 'Bebas Neue', sans-serif;
     font-size: 1.45rem; color: white; letter-spacing: 1px; line-height: 1;
@@ -113,21 +123,20 @@ const Footer = () => {
           {/* BRAND + CONTACT */}
           <div className="re-footer-brand">
             <div className="re-footer-logo">
+              {/* ── LOGO IMAGE (same as navbar) ── */}
               <div className="re-footer-logo-icon">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="white">
-                  <path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
-                </svg>
+                <img src={logoImg} alt="Rahul Enterprise Logo" />
               </div>
               <div>
                 <div className="re-footer-brand-name">
                   Rahul <span style={{ color: '#e85d04' }}>Enterprise</span>
                 </div>
-                <div className="re-footer-brand-sub">Cargo &amp; Logistics</div>
+                <div className="re-footer-brand-sub">Courier &amp; Logistics</div>
               </div>
             </div>
 
             <p className="re-footer-tagline">
-              GE-standard logistics network spanning 250+ cities — built from Kolkata, connecting every corner of India.
+              Standard logistics network spanning 250+ cities — built from Kolkata, connecting every corner of India.
             </p>
 
             <a href="tel:+919831499345" className="re-footer-contact-item">
@@ -162,7 +171,7 @@ const Footer = () => {
               </div>
               +91 8777432963
             </a>
-            <a href="mailto:info@rahulenterprise.in" className="re-footer-contact-item">
+            <a href="mailto:rahulenterprise123@gmail.com" className="re-footer-contact-item">
               <div className="re-footer-contact-icon">
                 <svg viewBox="0 0 24 24" width="12" height="12" fill="#e85d04">
                   <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
@@ -176,7 +185,7 @@ const Footer = () => {
                   <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
                 </svg>
               </div>
-              6,Porbazar Lane,Kolkata, West Bengal 700 020 — India
+              6, Porbazar Lane, Kolkata, West Bengal 700 020 — India
             </div>
           </div>
 
@@ -186,13 +195,12 @@ const Footer = () => {
           <div className="re-footer-links">
             <div className="re-footer-col">
               <h4>Navigate</h4>
-              
               <a href="/#services">Services</a>
               <a href="/#why">Why Us</a>
             </div>
             <div className="re-footer-col">
               <h4>Quick Links</h4>
-            <a href="/track">Track Shipment</a>
+              <a href="/track">Track Shipment</a>
               <a href="/#coverage">Coverage Map</a>
               <a href="/#tracking">Live Tracker</a>
             </div>
@@ -201,7 +209,6 @@ const Footer = () => {
               <a href="/#contact" style={{ color: '#22c55e', pointerEvents: 'none', cursor: 'default' }}>● Open Now</a>
               <span style={{ display: 'block', fontSize: '0.8rem', color: '#4b5563', marginBottom: '0.6rem' }}>Mon – Sun</span>
               <span style={{ display: 'block', fontSize: '0.8rem', color: '#6b7280', marginBottom: '0.6rem' }}>24 Hours Open</span>
-              <a href="/#contact" style={{ color: '#e85d04', fontSize: '0.8rem', marginTop: '0.5rem', display: 'inline-block' }}></a>
             </div>
           </div>
         </div>
