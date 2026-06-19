@@ -35,7 +35,16 @@ app.get('/api/health', (req, res) => {
   res.json({ success: true, message: 'Rahul Enterprise API is running 🚀', timestamp: new Date() });
 });
 
-// 404 handler
+// Serve React frontend (production build)
+const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
+app.use(express.static(frontendBuildPath));
+
+// Any non-API route should return the React app (so client-side routing works)
+app.get(/^\/(?!api\/).*/, (req, res) => {
+  res.sendFile(path.join(frontendBuildPath, 'index.html'));
+});
+
+// 404 handler (only reached for unmatched /api/* routes)
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
