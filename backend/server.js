@@ -3,6 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const connectDB = require('./config/db');
+console.log("🚀 SERVER STARTING...");
+console.log("MONGO URI EXISTS:", !!process.env.MONGO_URI);
+console.log("NODE_ENV:", process.env.NODE_ENV);
 
 connectDB();
 
