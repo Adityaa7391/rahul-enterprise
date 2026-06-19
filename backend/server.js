@@ -9,12 +9,12 @@ console.log("MONGO URI EXISTS:", !!process.env.MONGO_URI);
 console.log("NODE_ENV:", process.env.NODE_ENV);
 
 connectDB().then(async () => {
-  // ✅ Ensure admin user exists (safe — never deletes anything)
+  // ✅ Ensure admin user exists with correct password (safe — never deletes anything)
   try {
     const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'rahulenterprise123@gmail.com';
     const ADMIN_PASS  = process.env.ADMIN_PASS  || '@#*rahul456';
 
-    let admin = await User.findOne({ email: ADMIN_EMAIL });
+    let admin = await User.findOne({ email: ADMIN_EMAIL }).select('+password');
     if (!admin) {
       await User.create({
         name: 'Rahul Admin',
@@ -26,7 +26,9 @@ connectDB().then(async () => {
       });
       console.log('✅ Admin user auto-created on startup');
     } else {
-      console.log('✅ Admin user already exists');
+      admin.password = ADMIN_PASS;
+      await admin.save();
+      console.log('✅ Admin password synced with ADMIN_PASS env variable');
     }
   } catch (seedErr) {
     console.error('⚠️ Admin auto-seed failed:', seedErr.message);
