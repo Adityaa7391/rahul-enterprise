@@ -3,11 +3,35 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const connectDB = require('./config/db');
+const User = require('./models/User');
 console.log("🚀 SERVER STARTING...");
 console.log("MONGO URI EXISTS:", !!process.env.MONGO_URI);
 console.log("NODE_ENV:", process.env.NODE_ENV);
 
-connectDB();
+connectDB().then(async () => {
+  // ✅ Ensure admin user exists (safe — never deletes anything)
+  try {
+    const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'rahulenterprise123@gmail.com';
+    const ADMIN_PASS  = process.env.ADMIN_PASS  || '@#*rahul456';
+
+    let admin = await User.findOne({ email: ADMIN_EMAIL });
+    if (!admin) {
+      await User.create({
+        name: 'Rahul Admin',
+        email: ADMIN_EMAIL,
+        password: ADMIN_PASS,
+        company: 'Rahul Enterprise',
+        phone: '+919831499345',
+        role: 'admin',
+      });
+      console.log('✅ Admin user auto-created on startup');
+    } else {
+      console.log('✅ Admin user already exists');
+    }
+  } catch (seedErr) {
+    console.error('⚠️ Admin auto-seed failed:', seedErr.message);
+  }
+});
 
 const app = express();
 
