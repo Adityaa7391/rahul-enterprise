@@ -14,7 +14,7 @@
 
     "start": "cd backend && npm start",
 
-    "build:frontend": "cd frontend && npm install && npm run build"
+    "build:frontend": "cd backend && npm install && cd ../frontend && npm install && npm run build"
   },
   "devDependencies": {}
 }
