@@ -38,11 +38,15 @@ connectDB().then(async () => {
 const app = express();
 
 // Middleware
+const allowedOrigins = [
+  'https://rahulenterprise01.com',
+  'https://www.rahulenterprise01.com'
+];
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: allowedOrigins,
   credentials: true
 }));
-
 // ✅ Body size limit badha diya — bade payloads ke liye
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
