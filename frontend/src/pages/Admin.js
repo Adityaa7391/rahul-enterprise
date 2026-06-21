@@ -29,7 +29,8 @@ const fmtDate = (dateVal) => {
 const resolveImageUrl = (url) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  const base = (process.env.REACT_APP_API_URL || '').replace(/\/api$/, '');
+
+  const base = window.location.origin;
   return `${base}${url}`;
 };
 
