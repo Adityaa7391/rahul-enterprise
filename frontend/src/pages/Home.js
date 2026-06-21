@@ -1204,7 +1204,7 @@ const Contact = () => {
   };
 
   const contactDetails = [
-    { icon:'📍', label:'Head Office',     lines:['6, Porbazar Lane, Kolkata, West Bengal 700 020 — India'] },
+    { icon:'📍', label:'Head Office',     lines:['6, Porabazar Lane, Kolkata, West Bengal 700 020 — India'] },
     { icon:'📞', label:'Phone / WhatsApp', lines:['+91 98314 99345', '+91 85219 29774', '+91 9163189573', '+91 8777432963'] },
     { icon:'✉️', label:'Email',            lines:['rahulenterprise123@gmail.com'] },
     { icon:'🕐', label:'Working Hours',    lines:['Mon – Sun: 24 Hours Service Available'] },
