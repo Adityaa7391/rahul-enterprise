@@ -3,20 +3,18 @@ const router  = express.Router();
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('../config/cloudinary');
 const Shipment = require('../models/Shipment');
 
-// ── Multer config — save to /uploads/shipments/<shipmentId>/ ──
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = path.join(__dirname, '..', 'uploads', 'shipments', req.params.id);
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const ext  = path.extname(file.originalname).toLowerCase();
-    const name = `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
-    cb(null, name);
-  },
+// ── Multer config — upload directly to Cloudinary (persists across deploys) ──
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: (req, file) => ({
+    folder: `rahul-enterprise/shipments/${req.params.id}`,
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+    public_id: `${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+  }),
 });
 
 const fileFilter = (req, file, cb) => {
@@ -153,14 +151,15 @@ router.post('/:id/images', (req, res) => {
     try {
       const shipment = await Shipment.findById(req.params.id);
       if (!shipment) {
-        // Clean up uploaded files if shipment not found
-        if (req.files) req.files.forEach(f => fs.unlink(f.path, () => {}));
+        // Clean up uploaded files on Cloudinary if shipment not found
+        if (req.files) req.files.forEach(f => cloudinary.uploader.destroy(f.filename).catch(() => {}));
         return res.status(404).json({ success: false, message: 'Shipment not found' });
       }
 
-      // Build image records pointing to the public URL path
+      // Build image records pointing to the Cloudinary URL
       const newImages = (req.files || []).map(file => ({
-        url: `/uploads/shipments/${req.params.id}/${file.filename}`,
+        url: file.path, // Cloudinary's secure URL
+        cloudinaryId: file.filename, // needed to delete from Cloudinary later
         originalName: file.originalname,
         uploadedAt: new Date(),
       }));
@@ -174,8 +173,7 @@ router.post('/:id/images', (req, res) => {
       const allowedCount = 1 - currentCount;
       if (allowedCount <= 0) {
         newImages.forEach(img => {
-          const filePath = path.join(__dirname, '..', img.url);
-          fs.unlink(filePath, () => {});
+          cloudinary.uploader.destroy(img.cloudinaryId).catch(() => {});
         });
         return res.status(400).json({ success: false, message: 'Shipment already has 1 image (maximum).' });
       }
@@ -209,11 +207,12 @@ router.delete('/:id/images/:imageId', async (req, res) => {
     const image = shipment.images.id(req.params.imageId);
     if (!image) return res.status(404).json({ success: false, message: 'Image not found' });
 
-    // Delete file from disk
-    const filePath = path.join(__dirname, '..', image.url);
-    fs.unlink(filePath, (unlinkErr) => {
-      if (unlinkErr) console.warn('Could not delete file from disk:', filePath);
-    });
+    // Delete file from Cloudinary
+    if (image.cloudinaryId) {
+      cloudinary.uploader.destroy(image.cloudinaryId).catch((err) => {
+        console.warn('Could not delete image from Cloudinary:', err.message);
+      });
+    }
 
     await Shipment.findByIdAndUpdate(
       req.params.id,
@@ -314,11 +313,14 @@ router.delete('/:id', async (req, res) => {
     const shipment = await Shipment.findById(req.params.id);
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
 
-    // Delete the image folder for this shipment from disk
-    const imageDir = path.join(__dirname, '..', 'uploads', 'shipments', req.params.id);
-    fs.rm(imageDir, { recursive: true, force: true }, (err) => {
-      if (err) console.warn('Could not remove image folder:', imageDir);
-    });
+    // Delete all images for this shipment from Cloudinary
+    if (shipment.images && shipment.images.length > 0) {
+      shipment.images.forEach(img => {
+        if (img.cloudinaryId) {
+          cloudinary.uploader.destroy(img.cloudinaryId).catch(() => {});
+        }
+      });
+    }
 
     await Shipment.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: 'Deleted successfully' });
