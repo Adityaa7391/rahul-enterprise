@@ -11,6 +11,7 @@ const TrackingEventSchema = new mongoose.Schema({
 
 const ShipmentImageSchema = new mongoose.Schema({
   url:          { type: String, required: true },
+  cloudinaryId: { type: String },
   originalName: { type: String },
   uploadedAt:   { type: Date, default: Date.now },
 });
