@@ -30,6 +30,22 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB per file, max 1 file
 });
 
+// If a new status is set within this many milliseconds of the previous
+// tracking event, the previous event is treated as a mistaken entry and
+// is marked "superseded" so it no longer shows in the customer-facing
+// timeline. It still stays in the database for audit purposes.
+const SUPERSEDE_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
+
+// Strips out superseded events so customers only see the cleaned-up
+// timeline. Used for any response that is shown to the public/customer.
+const toCustomerView = (shipmentDoc) => {
+  const obj = shipmentDoc.toObject ? shipmentDoc.toObject() : shipmentDoc;
+  if (Array.isArray(obj.trackingEvents)) {
+    obj.trackingEvents = obj.trackingEvents.filter(ev => !ev.superseded);
+  }
+  return obj;
+};
+
 // ── GET /shipments/stats/summary ──
 router.get('/stats/summary', async (req, res) => {
   try {
@@ -53,7 +69,7 @@ router.get('/track/:trackingId', async (req, res) => {
     const shipment = await Shipment.findOne({ trackingId: req.params.trackingId });
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
     res.set('Cache-Control', 'no-store');
-    res.json({ success: true, data: shipment });
+    res.json({ success: true, data: toCustomerView(shipment) });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -280,26 +296,37 @@ router.put('/:id/status', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
 
-    const updateFields = { status, updatedAt: new Date() };
-    if (status === 'Delivered') updateFields.deliveredAt = new Date();
-
-    const shipment = await Shipment.findByIdAndUpdate(
-      req.params.id,
-      {
-        $set: updateFields,
-        $push: {
-          trackingEvents: {
-            status,
-            location: location || 'Hub',
-            description: description || `Status updated to ${status}`,
-            timestamp: new Date(),
-          }
-        },
-      },
-      { new: true }
-    );
-
+    const shipment = await Shipment.findById(req.params.id);
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
+
+    const now = new Date();
+    const events = shipment.trackingEvents || [];
+    const lastEvent = events[events.length - 1];
+
+    // If the previous event was added less than SUPERSEDE_WINDOW_MS ago,
+    // treat it as a mistaken entry: mark it superseded (kept in DB for
+    // audit, hidden from customers) instead of leaving it visible.
+    if (lastEvent && !lastEvent.superseded) {
+      const msSinceLastEvent = now - new Date(lastEvent.timestamp);
+      if (msSinceLastEvent <= SUPERSEDE_WINDOW_MS) {
+        lastEvent.superseded = true;
+      }
+    }
+
+    events.push({
+      status,
+      location: location || 'Hub',
+      description: description || `Status updated to ${status}`,
+      timestamp: now,
+    });
+
+    shipment.trackingEvents = events;
+    shipment.status = status;
+    shipment.updatedAt = now;
+    if (status === 'Delivered') shipment.deliveredAt = now;
+
+    await shipment.save();
+
     res.json({ success: true, data: shipment });
   } catch (e) {
     console.error('PUT /shipments/:id/status error:', e.message);
