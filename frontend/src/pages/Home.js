@@ -1095,15 +1095,22 @@ const WhyChooseUs = () => (
    COVERAGE SECTION
    ═══════════════════════════════════════════════════════════════ */
 const CoverageSection = () => {
-  const [activeState, setActiveState] = useState(null);
-
-  // ── UPDATED: Assam added, stats updated to 5 States & 148 Districts ──
-  const ZONE_CARDS = [
-    { id:'bihar',     col:'#22c55e', title:'Bihar — Origin Hub',              desc:'Deepest network from Patna HQ. Daily DV runs, dedicated handcarry teams, same-day pickup across all 38 districts.', dis:'38', hub:'Patna' },
-    { id:'jharkhand', col:'#f59e0b', title:'Jharkhand — Industrial Corridor',  desc:'Ranchi, Jamshedpur, Dhanbad steel belt with specialized heavy-cargo handling and mine logistics.',               dis:'24', hub:'Ranchi' },
-    { id:'westbengal',col:'#3b82f6', title:'West Bengal — East Gateway',       desc:'Kolkata East Hub connects to pan-India surface & air lanes. Full coverage across 23 districts.',               dis:'23', hub:'Kolkata' },
-    { id:'odisha',    col:'#a855f7', title:'Odisha — Coastal Connect',         desc:'Bhubaneswar hub enables coastal freight and e-commerce fulfillment across all 30 districts.',                   dis:'30', hub:'BBSR' },
-    { id:'assam',     col:'#06b6d4', title:'Assam — Northeast Gateway',        desc:'Guwahati hub serves as the key transit point for Northeast India, covering all 35 districts with dedicated surface and air connections.', dis:'35', hub:'Guwahati' },
+  // ── Simple state list shown on the right side of the map card ──
+  const COVERAGE_STATES = [
+    'West Bengal (Origin Hub)',
+    'Bihar',
+    'Odisha',
+    'Jharkhand',
+    'Assam',
+    'Bhutan',
+    'Arunachal Pradesh',
+    'Nepal',
+    'Nagaland',
+    'Manipur',
+    'Mizoram',
+    'Meghalaya',
+    'Tripura',
+    'Sikkim',
   ];
 
   return (
@@ -1112,7 +1119,7 @@ const CoverageSection = () => {
       <div style={{ maxWidth:1200, margin:'0 auto' }}>
         <Tag c="East India Coverage" />
         <H2 c={<>All Major Cities &<br />All Districts</>} light />
-        <Sub c="Complete coverage across West Bengal, Bihar, Jharkhand, Odisha & Assam — every district, every city, door to door." light />
+        <Sub c="Complete coverage across West Bengal, Bihar, Jharkhand, Odisha, Assam and the wider Northeast — every state, every city, door to door." light />
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:16, padding:12, background:'#050e1a', borderRadius:16, marginTop:'3rem' }} className="cover-grid">
 
@@ -1126,7 +1133,7 @@ const CoverageSection = () => {
                 GPS Active
               </div>
             </div>
-            <img src="/map2.png" alt="India East Zone Coverage Map" style={{ width:'100%', display:'block', objectFit:'cover', objectPosition:'center top' }} />
+            <img src="/map3.jpeg" alt="India East Zone Coverage Map" style={{ width:'100%', display:'block', objectFit:'cover', objectPosition:'center top' }} />
           </div>
 
           {/* ── INFO PANEL ── */}
@@ -1136,26 +1143,17 @@ const CoverageSection = () => {
               <span style={{ color:'#e85d04', fontSize:14, letterSpacing:1 }}>COVERAGE NETWORK</span>
             </div>
 
-            {ZONE_CARDS.map(z => (
-              <div key={z.id}
-                className={`re-zone-card${activeState === z.id ? ' re-active' : ''}`}
-                onClick={() => setActiveState(activeState === z.id ? null : z.id)}
-                style={{ borderRadius:'0 8px 8px 0', padding:'11px 12px', border:`1px solid rgba(255,255,255,.07)`, borderLeftColor:z.col, borderLeftWidth:4, borderLeftStyle:'solid', cursor:'pointer', background:'rgba(255,255,255,.03)' }}>
-                <div style={{ fontWeight:700, color:'white', fontSize:12.5, marginBottom:3 }}>{z.title}</div>
-                <div style={{ fontSize:11, color:'#9ca3af', lineHeight:1.6 }}>{z.desc}</div>
-                <div style={{ marginTop:5, display:'flex', gap:6, flexWrap:'wrap' }}>
-                  <span style={{ fontSize:9.5, fontWeight:700, color:z.col, background:`${z.col}22`, padding:'2px 7px', borderRadius:4 }}>{z.dis} Districts</span>
-                  <span style={{ fontSize:9.5, fontWeight:700, color:z.col, background:`${z.col}22`, padding:'2px 7px', borderRadius:4 }}>Hub: {z.hub}</span>
-                </div>
-              </div>
-            ))}
-
-            {/* ── UPDATED: 5 States, 150 Districts ── */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginTop:2 }}>
-              {[['5','States','#e85d04'],['150+','Districts','#e85d04'],['20+','Cities','#e85d04'],['99.2','On-Time%','#22c55e']].map(([n,l,c]) => (
-                <div key={l} style={{ background:'rgba(232,93,4,.08)', border:'1px solid rgba(232,93,4,.2)', borderRadius:9, padding:'8px 4px', textAlign:'center' }}>
-                  <div style={{ fontSize:19, fontWeight:800, color:c, lineHeight:1 }}>{n}</div>
-                  <div style={{ fontSize:8, color:'#9ca3af', marginTop:2, textTransform:'uppercase', letterSpacing:.5 }}>{l}</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              {COVERAGE_STATES.map(state => (
+                <div key={state}
+                  style={{
+                    display:'flex', alignItems:'center', gap:9,
+                    padding:'9px 12px', borderRadius:8,
+                    background:'rgba(255,255,255,.03)',
+                    border:'1px solid rgba(255,255,255,.07)',
+                  }}>
+                  <span style={{ width:7, height:7, borderRadius:'50%', background:'#e85d04', flexShrink:0 }} />
+                  <span style={{ fontSize:12.5, fontWeight:600, color:'white' }}>{state}</span>
                 </div>
               ))}
             </div>
