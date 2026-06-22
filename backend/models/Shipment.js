@@ -1,21 +1,23 @@
 const mongoose = require('mongoose');
-
 const TrackingEventSchema = new mongoose.Schema({
   status:      { type: String, required: true },
   location:    { type: String, required: true },
   description: { type: String },
   timestamp:   { type: Date, default: Date.now },
   gpsActive:   { type: Boolean, default: false },
-  coordinates: { lat: { type: Number }, lng: { type: Number } }
+  coordinates: { lat: { type: Number }, lng: { type: Number } },
+  // True when this event was superseded by a correction made within
+  // SUPERSEDE_WINDOW_MS of this event being created. Superseded events
+  // stay in the database for audit purposes but are hidden from the
+  // customer-facing tracking view.
+  superseded:  { type: Boolean, default: false },
 });
-
 const ShipmentImageSchema = new mongoose.Schema({
   url:          { type: String, required: true },
   cloudinaryId: { type: String },
   originalName: { type: String },
   uploadedAt:   { type: Date, default: Date.now },
 });
-
 const ShipmentSchema = new mongoose.Schema({
   trackingId: {
     type: String, required: true, unique: true,
@@ -58,12 +60,10 @@ const ShipmentSchema = new mongoose.Schema({
 }, {
   strict: false
 });
-
 ShipmentSchema.pre('save', function (next) {
   this.updatedAt = new Date();
   if (this.serviceType === 'Dedicated Vehicle') this.gpsEnabled = true;
   if (this.status === 'Delivered' && !this.deliveredAt) this.deliveredAt = new Date();
   next();
 });
-
 module.exports = mongoose.model('Shipment', ShipmentSchema);
