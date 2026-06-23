@@ -500,7 +500,7 @@ const DownloadActions = ({ shipment }) => {
  * in the admin "Add Shipment" form — CN/Challan numbers, route, service
  * type, dispatch & expected delivery dates — plus the uploaded shipment
  * photo, shown inline (not just downloadable) with a click-to-enlarge
- * lightbox. Reused across Hero, TrackingSection and SlidingTracker so
+ * lightbox. Reused across Hero and SlidingTracker so
  * every public tracking result looks consistent.
  */
 const ShipmentDetailCard = ({ shipment, compact = false }) => {
@@ -787,7 +787,7 @@ const SlidingTracker = () => {
                 {result.trackingEvents?.map((ev, i) => (
                   <div key={i} style={{ display:'flex', gap:14, position:'relative' }}>
                     {i < result.trackingEvents.length-1 && <div style={{ position:'absolute', left:9, top:22, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />}
-                    <div style={{ width:20, height:20, borderRadius:'50%', flexShrink:0, marginTop:2, background: i===result.trackingEvents.length-1?'#e85d04':'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    <div style={{ width:20, height:20, borderRadius:'50%', flexShrink:0, marginTop:2, background:'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
                       {i < result.trackingEvents.length-1 && <svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>}
                     </div>
                     <div style={{ paddingBottom:18 }}>
@@ -836,10 +836,25 @@ const Hero = () => {
   };
 
   return (
-    <section style={{ background:'#122040', minHeight:'88vh', display:'flex', alignItems:'center', position:'relative', overflow:'hidden' }}>
+    <section id="tracking" style={{ background:'#122040', minHeight:'88vh', display:'flex', alignItems:'center', position:'relative', overflow:'hidden' }}>
       <div style={{ position:'absolute', right:-100, top:-100, width:700, height:700, background:'radial-gradient(circle,rgba(232,93,4,.13) 0%,transparent 70%)', pointerEvents:'none' }} />
       <div className="hero-grid" style={{ maxWidth:1200, margin:'0 auto', padding:'4rem 2rem', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4rem', alignItems:'center', width:'100%' }}>
         <div>
+          <div style={{
+            display:'inline-flex', alignItems:'center', gap:8,
+            background:'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.14)',
+            borderRadius:30, padding:'0.45rem 1rem 0.45rem 0.6rem', marginBottom:'1.25rem',
+          }}>
+            <span style={{
+              width:24, height:24, borderRadius:'50%', background:'rgba(232,93,4,.18)',
+              display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+            }}>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="#e85d04"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-1.5 14.5L6 11l1.41-1.41L10.5 12.67l6.09-6.09L18 8l-7.5 7.5z"/></svg>
+            </span>
+            <span style={{ fontSize:'0.78rem', color:'#e5e7eb', fontWeight:500 }}>
+              Trusted partner to <strong style={{ color:'white', fontWeight:700 }}>Wipro GE Healthcare</strong> for 15 years
+            </span>
+          </div>
           <Tag c="Rahul Enterprise Logistics" />
           <h1 className="hero-h1" style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'clamp(3rem,6vw,5rem)', color:'white', lineHeight:1.05, marginBottom:'1.5rem' }}>
             Move Smarter.<br />Track <span style={{ color:'#e85d04' }}>Every</span><br />Shipment.
@@ -897,7 +912,7 @@ const Hero = () => {
                     {i < result.trackingEvents.length-1 && (
                       <div style={{ position:'absolute', left:8, top:20, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />
                     )}
-                    <div style={{ width:18, height:18, borderRadius:'50%', flexShrink:0, marginTop:2, background: i===result.trackingEvents.length-1?'#e85d04':'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    <div style={{ width:18, height:18, borderRadius:'50%', flexShrink:0, marginTop:2, background:'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
                       {i < result.trackingEvents.length-1 && (
                         <svg viewBox="0 0 24 24" width="9" height="9" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
                       )}
@@ -929,89 +944,6 @@ const Hero = () => {
   );
 };
 
-/* ─── TRACKING SECTION ──────────────────────────────────────────── */
-const TrackingSection = () => {
-  const [trackId, setTrackId] = useState('');
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const statusColors = { 'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6','Picked Up':'#f48c06','Booked':'#9ca3af','Failed':'#ef4444' };
-
-  const handleTrack = async () => {
-    if (!trackId.trim()) return;
-    setLoading(true); setError(''); setResult(null);
-    try { const { data } = await API.get(`/shipments/track/${trackId.trim()}`); setResult(data.data); }
-    catch(e) { setError(e.response?.data?.message || 'Shipment not found.'); }
-    finally { setLoading(false); }
-  };
-
-  return (
-    <section id="tracking" className="re-section" style={{ background:'#0a1628', padding:'5rem 2rem', position:'relative', overflow:'hidden' }}>
-      <div style={{ position:'absolute', right:-200, top:-200, width:600, height:600, background:'radial-gradient(circle,rgba(232,93,4,.1) 0%,transparent 60%)', pointerEvents:'none' }} />
-      <div style={{ maxWidth:1200, margin:'0 auto' }}>
-        <Tag c="Real-Time Tracking" />
-        <H2 c="Track Your Shipment Instantly" light />
-        <Sub c="Enter your consignment number to get live status, location, and estimated delivery time." light />
-        <div className="two-col" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4rem', marginTop:'3rem' }}>
-          <div style={{ background:'rgba(255,255,255,.05)', border:'1px solid rgba(255,255,255,.1)', borderRadius:16, padding:'2rem' }}>
-            <label style={{ fontSize:'0.8rem', color:'#9ca3af', fontWeight:600, marginBottom:'0.5rem', display:'block', textTransform:'uppercase', letterSpacing:1 }}>Consignment Number</label>
-            <input value={trackId} onChange={e=>setTrackId(e.target.value.toUpperCase())} placeholder="Please Enter a valid CN Number"
-              style={{ width:'100%', padding:'0.85rem 1rem', background:'rgba(255,255,255,.07)', border:'1.5px solid rgba(255,255,255,.12)', borderRadius:6, color:'white', fontFamily:'inherit', fontSize:'0.9rem', outline:'none', marginBottom:'1rem' }} />
-            <button onClick={handleTrack} disabled={loading}
-              style={{ width:'100%', background:'#e85d04', color:'white', border:'none', padding:'0.9rem', borderRadius:4, fontWeight:700, fontSize:'0.95rem', cursor:'pointer' }}>
-              {loading ? 'Searching…' : 'Track Now'}
-            </button>
-            {error && <div style={{ marginTop:'1rem', padding:'1rem', background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', borderRadius:8, color:'#fca5a5', fontSize:'0.83rem' }}>{error}</div>}
-            {result && (
-              <div className="re-fade-up" style={{ marginTop:'1.5rem', padding:'1.5rem', background:'rgba(255,255,255,.04)', border:'1px solid rgba(34,197,94,.3)', borderRadius:10 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:'0.75rem', flexWrap:'wrap' }}>
-                  <span style={{ background:`${statusColors[result.status]}22`, color:statusColors[result.status], fontSize:'0.72rem', fontWeight:700, padding:'4px 10px', borderRadius:4, letterSpacing:1 }}>{result.status.toUpperCase()}</span>
-                  <span style={{ fontFamily:'monospace', color:'white', fontWeight:600 }}>{result.trackingId}</span>
-                </div>
-                <div style={{ fontSize:'0.82rem', color:'#9ca3af', marginBottom:'0.5rem' }}>{result.origin} → {result.destination} · {result.serviceType}</div>
-                <StepTracker status={result.status} dark={true} />
-                <div style={{ marginTop:'1.25rem' }}>
-                  {result.trackingEvents?.map((ev,i) => (
-                    <div key={i} style={{ display:'flex', gap:14, position:'relative' }}>
-                      {i<result.trackingEvents.length-1 && <div style={{ position:'absolute', left:9, top:22, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />}
-                      <div style={{ width:20, height:20, borderRadius:'50%', flexShrink:0, marginTop:2, background:i===result.trackingEvents.length-1?'#e85d04':'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                        {i<result.trackingEvents.length-1&&<svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>}
-                      </div>
-                      <div style={{ paddingBottom:18 }}>
-                        <div style={{ fontSize:'0.84rem', fontWeight:600, color:'white' }}>{ev.status} — {ev.location}</div>
-                        <div style={{ fontSize:'0.71rem', color:'#6b7280', marginTop:2 }}>{new Date(ev.timestamp).toLocaleString('en-IN')}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <ShipmentDetailCard shipment={result} />
-                <DownloadActions shipment={result} />
-              </div>
-            )}
-          </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:'1.5rem' }}>
-            {[
-              { title:'Live GPS Tracking',        desc:'All DV shipments carry GPS devices with location updates every 2 minutes.' },
-              { title:'Instant SMS & Email Alerts', desc:'Automated notifications at every milestone with POD confirmation.' },
-              { title:'Complete Shipment History',  desc:'Access full consignment history, downloadable PODs, and audit trails.' },
-              { title:'Bulk Tracking & API',        desc:'Track multiple consignments at once or integrate via our REST API.' },
-            ].map(f => (
-              <div key={f.title} style={{ display:'flex', gap:'1rem', alignItems:'flex-start' }}>
-                <div style={{ width:44, height:44, background:'rgba(232,93,4,.1)', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  <svg viewBox="0 0 24 24" width="22" height="22" fill="#e85d04"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-                </div>
-                <div>
-                  <div style={{ fontWeight:700, color:'white', fontSize:'0.9rem', marginBottom:4 }}>{f.title}</div>
-                  <div style={{ fontSize:'0.82rem', color:'#9ca3af', lineHeight:1.6 }}>{f.desc}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-};
 
 /* ─── SERVICES ──────────────────────────────────────────────────── */
 const SvcIcon = ({ d }) => (
@@ -1306,7 +1238,6 @@ const Home = () => (
   <>
     <GlobalStyles />
     <Hero />
-    <TrackingSection />
     <Services />
     <WhyChooseUs />
     <CoverageSection />
