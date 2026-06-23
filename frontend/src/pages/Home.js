@@ -480,7 +480,7 @@ const DownloadActions = ({ shipment }) => {
               'Downloading…'
             ) : (
               <>
-                <span style={{ fontSize: '15px', lineHeight: 1 }}>📄</span>
+                <StatusIcon name="pod" size={15} color="currentColor" />
                 Download POD
               </>
             )}
@@ -611,18 +611,47 @@ const ShipmentDetailCard = ({ shipment, compact = false }) => {
 };
 
 /* ─── STEP PROGRESS TRACKER ─────────────────────────────────────── */
+const StatusIcon = ({ name, size = 16, color = 'currentColor' }) => {
+  const paths = {
+    booked: <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M3.27 6.96L12 12l8.73-5.04 M12 22.08V12" />,
+    transit: <path d="M3 7h11v8H3zM14 10h4l3 3v2h-7zM6.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM17.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />,
+    outForDelivery: <path d="M5 17h2.5a1.5 1.5 0 1 1-3 0H1V6a1 1 0 0 1 1-1h12v4 M14 9h4l3 3.5V17h-2.5a1.5 1.5 0 1 1-3 0H8 M1 10h7 M1 13h5" />,
+    delivered: <path d="M9 12l2 2 4-4 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
+    failed: <path d="M12 9v4 M12 16.5h.01 M10.3 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.4 0z" />,
+    returned: <path d="M9 14L4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,
+    pod: <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M9 15l2 2 4-4" />,
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {paths[name]}
+    </svg>
+  );
+};
+
 const STEPS = [
-  { label: 'Booked',           icon: '📦' },
-  { label: 'In Transit',       icon: '🚚' },
-  { label: 'Out for Delivery', icon: '🚛' },
-  { label: 'Delivered',        icon: '✅' },
+  { label: 'Booked',           icon: 'booked' },
+  { label: 'In Transit',       icon: 'transit' },
+  { label: 'Out for Delivery', icon: 'outForDelivery' },
+  { label: 'Delivered',        icon: 'delivered' },
 ];
+
+// Resolves any tracking-event status string to its icon name, covering
+// the 4 normal steps plus the Failed/Returned exceptions. Used wherever
+// a single event row needs its matching icon (e.g. the events timeline).
+const iconForStatus = (status) => {
+  const stepMatch = STEPS.find(s => s.label === status);
+  if (stepMatch) return stepMatch.icon;
+  if (status === 'Failed') return 'failed';
+  if (status === 'Returned') return 'returned';
+  const idx = stepIndex(status);
+  return idx >= 0 ? STEPS[idx].icon : 'booked';
+};
 
 // Exception states that fall outside the normal forward progression.
 // Each gets its own professional icon + color instead of joining the step line.
 const EXCEPTION_STATUS_META = {
-  'Failed':   { icon: '⚠️', color: '#ef4444', label: 'Delivery Failed' },
-  'Returned': { icon: '↩️', color: '#a855f7', label: 'Returned to Sender' },
+  'Failed':   { icon: 'failed',   color: '#ef4444', label: 'Delivery Failed' },
+  'Returned': { icon: 'returned', color: '#a855f7', label: 'Returned to Sender' },
 };
 
 const stepIndex = (status) => {
@@ -652,7 +681,7 @@ const StepTracker = ({ status, dark = true }) => {
         background: `${exception.color}14`, border: `1px solid ${exception.color}40`,
         borderRadius: 10, padding: '0.85rem 1rem',
       }}>
-        <span style={{ fontSize: '1.3rem', lineHeight: 1 }}>{exception.icon}</span>
+        <StatusIcon name={exception.icon} size={20} color={exception.color} />
         <span style={{ color: exception.color, fontWeight: 700, fontSize: '0.85rem' }}>{exception.label}</span>
       </div>
     );
@@ -678,18 +707,20 @@ const StepTracker = ({ status, dark = true }) => {
                 border: 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 position: 'relative', zIndex: 1, flexShrink: 0,
-                fontSize: '17px', lineHeight: 1,
-                filter: done ? 'none' : 'grayscale(1) opacity(0.45)',
-                transition: 'filter 0.3s',
+                color: done ? '#22c55e' : textColor,
+                opacity: done ? 1 : 0.5,
+                transition: 'color 0.3s, opacity 0.3s',
               }}>
-                {icon}
+                <StatusIcon name={icon} size={18} color="currentColor" />
               </div>
               <div style={{
                 marginTop: 6, fontSize: '0.65rem', fontWeight: isCurrent ? 700 : 500,
                 color: done ? (isCurrent ? '#22c55e' : (dark ? '#86efac' : '#16a34a')) : textColor,
                 textAlign: 'center', lineHeight: 1.3, maxWidth: 64, transition: 'color 0.3s',
+                display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center',
               }}>
-                {icon} {label}
+                <StatusIcon name={icon} size={11} color="currentColor" />
+                {label}
               </div>
             </div>
           );
@@ -815,7 +846,10 @@ const SlidingTracker = () => {
                       {i < result.trackingEvents.length-1 && <svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>}
                     </div>
                     <div style={{ paddingBottom:18 }}>
-                      <div style={{ fontSize:'0.84rem', fontWeight:600, color:'white' }}>{ev.status} — {ev.location}</div>
+                      <div style={{ fontSize:'0.84rem', fontWeight:600, color:'white', display:'flex', alignItems:'center', gap:6 }}>
+                        <span style={{ color:'#22c55e', display:'flex', flexShrink:0 }}><StatusIcon name={iconForStatus(ev.status)} size={13} color="currentColor" /></span>
+                        {ev.status} — {ev.location}
+                      </div>
                       <div style={{ fontSize:'0.71rem', color:'#6b7280', marginTop:2 }}>{new Date(ev.timestamp).toLocaleString('en-IN')} {ev.gpsActive && '· GPS Active'}</div>
                     </div>
                   </div>
@@ -942,7 +976,10 @@ const Hero = () => {
                       )}
                     </div>
                     <div style={{ paddingBottom:14 }}>
-                      <div style={{ fontSize:'0.78rem', fontWeight:600, color:'white' }}>{ev.status} — {ev.location}</div>
+                      <div style={{ fontSize:'0.78rem', fontWeight:600, color:'white', display:'flex', alignItems:'center', gap:6 }}>
+                        <span style={{ color:'#22c55e', display:'flex', flexShrink:0 }}><StatusIcon name={iconForStatus(ev.status)} size={12} color="currentColor" /></span>
+                        {ev.status} — {ev.location}
+                      </div>
                       <div style={{ fontSize:'0.68rem', color:'#6b7280', marginTop:2 }}>{new Date(ev.timestamp).toLocaleString('en-IN')} {ev.gpsActive && '· GPS'}</div>
                     </div>
                   </div>
