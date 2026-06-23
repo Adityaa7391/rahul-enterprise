@@ -19,7 +19,7 @@ const NAV_CSS = `
     overflow: hidden; 
     border: 2px solid #e85d04; 
   }
-  .re-logo-icon img { width: 100%; height: 100%; object-fit: cover; }
+  .re-logo-icon img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.35); }
 
   .re-logo-name { color: white; font-family: 'Bebas Neue', sans-serif; font-size: 1.55rem; letter-spacing: 1px; line-height: 1; }
   .re-logo-sub { font-size: 0.6rem; color: #9ca3af; letter-spacing: 2.5px; text-transform: uppercase; font-weight: 400; margin-top: 1px; }
