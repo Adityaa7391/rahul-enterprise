@@ -33,7 +33,7 @@ const FOOTER_CSS = `
     overflow: hidden;
     border: 2px solid #e85d04;
   }
-  .re-footer-logo-icon img { width: 100%; height: 100%; object-fit: cover; }
+  .re-footer-logo-icon img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.35); }
   .re-footer-brand-name {
     font-family: 'Bebas Neue', sans-serif;
     font-size: 1.45rem; color: white; letter-spacing: 1px; line-height: 1;
