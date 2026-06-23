@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import logoImg from './logo.png';
 
 const NAV_CSS = `
   .re-nav { background: #0a1628; position: sticky; top: 0; z-index: 1000; border-bottom: 3px solid #e85d04; font-family: 'DM Sans', sans-serif; }
-  .re-nav-inner { max-width: 1320px; margin: 0 auto; padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 68px; gap: 1rem; }
+  .re-nav-inner { max-width: 1480px; margin: 0 auto; padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 68px; gap: 1rem; }
 
   .re-logo { display: flex; align-items: center; gap: 12px; text-decoration: none; flex-shrink: 0; }
   
@@ -17,9 +18,8 @@ const NAV_CSS = `
     flex-shrink: 0; 
     overflow: hidden; 
     border: 2px solid #e85d04; 
-    background: #0d1f3c;
   }
-  .re-logo-icon svg { width: 26px; height: 26px; }
+  .re-logo-icon img { width: 100%; height: 100%; object-fit: cover; }
 
   .re-logo-name { color: white; font-family: 'Bebas Neue', sans-serif; font-size: 1.55rem; letter-spacing: 1px; line-height: 1; }
   .re-logo-sub { font-size: 0.6rem; color: #9ca3af; letter-spacing: 2.5px; text-transform: uppercase; font-weight: 400; margin-top: 1px; }
@@ -131,11 +131,7 @@ const Navbar = () => {
         {/* LOGO */}
         <Link to="/" className="re-logo">
           <div className="re-logo-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="9.25" stroke="#e85d04" strokeWidth="1.4" fill="none" />
-              <ellipse cx="12" cy="12" rx="4" ry="9.25" stroke="#e85d04" strokeWidth="1.2" fill="none" />
-              <path d="M2.75 9h18.5M2.75 15h18.5" stroke="#e85d04" strokeWidth="1.2" />
-            </svg>
+            <img src={logoImg} alt="Rahul Enterprise Logo" />
           </div>
           <div>
             <div className="re-logo-name">Rahul Enterprise</div>
