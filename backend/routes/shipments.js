@@ -30,11 +30,10 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB per file, max 1 file
 });
 
-// If a new status is set within this many milliseconds of the previous
-// tracking event, the previous event is treated as a mistaken entry and
-// is marked "superseded" so it no longer shows in the customer-facing
-// timeline. It still stays in the database for audit purposes.
-const SUPERSEDE_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
+// Canonical forward order of the normal delivery lifecycle. 'Failed' and
+// 'Returned' are exception states, not steps in this line, so they are
+// handled separately (see below) and never hide other events.
+const STATUS_ORDER = ['Booked', 'Picked Up', 'In Transit', 'Out for Delivery', 'Delivered'];
 
 // Strips out superseded events so customers only see the cleaned-up
 // timeline. Used for any response that is shown to the public/customer.
@@ -44,6 +43,30 @@ const toCustomerView = (shipmentDoc) => {
     obj.trackingEvents = obj.trackingEvents.filter(ev => !ev.superseded);
   }
   return obj;
+};
+
+// Recomputes which tracking events should be visible to customers based
+// on the shipment's CURRENT status, not the order events were created in.
+//
+// Example: events were added Booked -> Picked Up -> In Transit -> Out for
+// Delivery, then the admin sets status back to "Picked Up". This function
+// marks the "In Transit" and "Out for Delivery" events as superseded so
+// customers only see Booked -> Picked Up. If the admin later moves forward
+// again (e.g. back to "In Transit"), any previously-superseded event that
+// is still at or before the new status is un-hidden again, instead of
+// creating a duplicate.
+const recomputeVisibility = (shipment, newStatus) => {
+  const newIdx = STATUS_ORDER.indexOf(newStatus);
+
+  // 'Failed' / 'Returned' are exceptions outside the normal progression —
+  // don't hide/unhide anything based on them, just record the event.
+  if (newIdx === -1) return;
+
+  shipment.trackingEvents.forEach((ev) => {
+    const evIdx = STATUS_ORDER.indexOf(ev.status);
+    if (evIdx === -1) return; // leave Failed/Returned events untouched
+    ev.superseded = evIdx > newIdx;
+  });
 };
 
 // ── GET /shipments/stats/summary ──
@@ -300,27 +323,29 @@ router.put('/:id/status', async (req, res) => {
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
 
     const now = new Date();
-    const events = shipment.trackingEvents || [];
-    const lastEvent = events[events.length - 1];
+    shipment.trackingEvents = shipment.trackingEvents || [];
 
-    // If the previous event was added less than SUPERSEDE_WINDOW_MS ago,
-    // treat it as a mistaken entry: mark it superseded (kept in DB for
-    // audit, hidden from customers) instead of leaving it visible.
-    if (lastEvent && !lastEvent.superseded) {
-      const msSinceLastEvent = now - new Date(lastEvent.timestamp);
-      if (msSinceLastEvent <= SUPERSEDE_WINDOW_MS) {
-        lastEvent.superseded = true;
-      }
+    // If an event for this exact status already exists (e.g. admin moved
+    // forward, then back, then forward again to the same step), don't
+    // create a duplicate row — just refresh its details/timestamp.
+    const existingEvent = shipment.trackingEvents.find(ev => ev.status === status);
+    if (existingEvent) {
+      existingEvent.location = location || existingEvent.location || 'Hub';
+      existingEvent.description = description || existingEvent.description || `Status updated to ${status}`;
+      existingEvent.timestamp = now;
+    } else {
+      shipment.trackingEvents.push({
+        status,
+        location: location || 'Hub',
+        description: description || `Status updated to ${status}`,
+        timestamp: now,
+      });
     }
 
-    events.push({
-      status,
-      location: location || 'Hub',
-      description: description || `Status updated to ${status}`,
-      timestamp: now,
-    });
+    // Hide every event that sits AFTER the newly-set status in the
+    // normal lifecycle order, and un-hide everything at or before it.
+    recomputeVisibility(shipment, status);
 
-    shipment.trackingEvents = events;
     shipment.status = status;
     shipment.updatedAt = now;
     if (status === 'Delivered') shipment.deliveredAt = now;
