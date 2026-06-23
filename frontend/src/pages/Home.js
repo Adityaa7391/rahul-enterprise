@@ -480,9 +480,7 @@ const DownloadActions = ({ shipment }) => {
               'Downloading…'
             ) : (
               <>
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
-                  <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
-                </svg>
+                <span style={{ fontSize: '15px', lineHeight: 1 }}>📄</span>
                 Download POD
               </>
             )}
@@ -613,7 +611,19 @@ const ShipmentDetailCard = ({ shipment, compact = false }) => {
 };
 
 /* ─── STEP PROGRESS TRACKER ─────────────────────────────────────── */
-const STEPS = ['Booked', 'In Transit', 'Out for Delivery', 'Delivered'];
+const STEPS = [
+  { label: 'Booked',           icon: '📦' },
+  { label: 'In Transit',       icon: '🚚' },
+  { label: 'Out for Delivery', icon: '🚛' },
+  { label: 'Delivered',        icon: '✅' },
+];
+
+// Exception states that fall outside the normal forward progression.
+// Each gets its own professional icon + color instead of joining the step line.
+const EXCEPTION_STATUS_META = {
+  'Failed':   { icon: '⚠️', color: '#ef4444', label: 'Delivery Failed' },
+  'Returned': { icon: '↩️', color: '#a855f7', label: 'Returned to Sender' },
+};
 
 const stepIndex = (status) => {
   const map = { 'Booked': 0, 'In Transit': 1, 'Out for Delivery': 2, 'Delivered': 3 };
@@ -630,19 +640,36 @@ const StepTracker = ({ status, dark = true }) => {
   const activeIdx = stepIndex(status);
   const textColor = dark ? '#9ca3af' : '#6b7280';
   const lineColor = dark ? 'rgba(255,255,255,0.12)' : '#e8e4dc';
+  const exception = EXCEPTION_STATUS_META[status];
+
+  // Failed / Returned are exceptions outside the normal progression —
+  // show a dedicated banner instead of forcing them onto the step line.
+  if (exception) {
+    return (
+      <div style={{
+        marginTop: '1.25rem', marginBottom: '0.5rem',
+        display: 'flex', alignItems: 'center', gap: 10,
+        background: `${exception.color}14`, border: `1px solid ${exception.color}40`,
+        borderRadius: 10, padding: '0.85rem 1rem',
+      }}>
+        <span style={{ fontSize: '1.3rem', lineHeight: 1 }}>{exception.icon}</span>
+        <span style={{ color: exception.color, fontWeight: 700, fontSize: '0.85rem' }}>{exception.label}</span>
+      </div>
+    );
+  }
 
   return (
     <div style={{ marginTop: '1.25rem', marginBottom: '0.5rem' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', position: 'relative' }}>
-        {STEPS.map((step, i) => {
+        {STEPS.map(({ label, icon }, i) => {
           const done = i <= activeIdx;
           const isCurrent = i === activeIdx;
           return (
-            <div key={step} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1 }}>
+            <div key={label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', zIndex: 1 }}>
               {i > 0 && (
                 <div style={{
                   position: 'absolute', top: 14, left: '-50%', width: '100%', height: 2,
-                  background: i <= activeIdx ? '#22c55e' : lineColor, transition: 'background 0.3s', zIndex: 0,
+                  background: done ? '#22c55e' : lineColor, transition: 'background 0.3s', zIndex: 0,
                 }} />
               )}
               <div style={{
@@ -653,19 +680,17 @@ const StepTracker = ({ status, dark = true }) => {
                 position: 'relative', zIndex: 1, flexShrink: 0,
                 boxShadow: isCurrent ? '0 0 0 3px rgba(34,197,94,0.25)' : 'none',
                 transition: 'all 0.3s',
+                fontSize: '13px', lineHeight: 1,
+                filter: done ? 'none' : 'grayscale(1) opacity(0.55)',
               }}>
-                {done && (
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="white">
-                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
-                  </svg>
-                )}
+                {icon}
               </div>
               <div style={{
                 marginTop: 6, fontSize: '0.65rem', fontWeight: isCurrent ? 700 : 500,
                 color: done ? (isCurrent ? '#22c55e' : (dark ? '#86efac' : '#16a34a')) : textColor,
                 textAlign: 'center', lineHeight: 1.3, maxWidth: 64, transition: 'color 0.3s',
               }}>
-                {step}
+                {label}
               </div>
             </div>
           );
