@@ -635,18 +635,6 @@ const STEPS = [
   { label: 'Delivered',        icon: 'delivered' },
 ];
 
-// Resolves any tracking-event status string to its icon name, covering
-// the 4 normal steps plus the Failed/Returned exceptions. Used wherever
-// a single event row needs its matching icon (e.g. the events timeline).
-const iconForStatus = (status) => {
-  const stepMatch = STEPS.find(s => s.label === status);
-  if (stepMatch) return stepMatch.icon;
-  if (status === 'Failed') return 'failed';
-  if (status === 'Returned') return 'returned';
-  const idx = stepIndex(status);
-  return idx >= 0 ? STEPS[idx].icon : 'booked';
-};
-
 // Exception states that fall outside the normal forward progression.
 // Each gets its own professional icon + color instead of joining the step line.
 const EXCEPTION_STATUS_META = {
@@ -846,10 +834,7 @@ const SlidingTracker = () => {
                       {i < result.trackingEvents.length-1 && <svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>}
                     </div>
                     <div style={{ paddingBottom:18 }}>
-                      <div style={{ fontSize:'0.84rem', fontWeight:600, color:'white', display:'flex', alignItems:'center', gap:6 }}>
-                        <span style={{ color:'#22c55e', display:'flex', flexShrink:0 }}><StatusIcon name={iconForStatus(ev.status)} size={13} color="currentColor" /></span>
-                        {ev.status} — {ev.location}
-                      </div>
+                      <div style={{ fontSize:'0.84rem', fontWeight:600, color:'white' }}>{ev.status} — {ev.location}</div>
                       <div style={{ fontSize:'0.71rem', color:'#6b7280', marginTop:2 }}>{new Date(ev.timestamp).toLocaleString('en-IN')} {ev.gpsActive && '· GPS Active'}</div>
                     </div>
                   </div>
@@ -976,10 +961,7 @@ const Hero = () => {
                       )}
                     </div>
                     <div style={{ paddingBottom:14 }}>
-                      <div style={{ fontSize:'0.78rem', fontWeight:600, color:'white', display:'flex', alignItems:'center', gap:6 }}>
-                        <span style={{ color:'#22c55e', display:'flex', flexShrink:0 }}><StatusIcon name={iconForStatus(ev.status)} size={12} color="currentColor" /></span>
-                        {ev.status} — {ev.location}
-                      </div>
+                      <div style={{ fontSize:'0.78rem', fontWeight:600, color:'white' }}>{ev.status} — {ev.location}</div>
                       <div style={{ fontSize:'0.68rem', color:'#6b7280', marginTop:2 }}>{new Date(ev.timestamp).toLocaleString('en-IN')} {ev.gpsActive && '· GPS'}</div>
                     </div>
                   </div>
