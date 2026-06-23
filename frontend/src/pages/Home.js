@@ -674,14 +674,13 @@ const StepTracker = ({ status, dark = true }) => {
               )}
               <div style={{
                 width: 28, height: 28, borderRadius: '50%',
-                background: done ? '#22c55e' : 'transparent',
-                border: done ? 'none' : `2px solid ${lineColor}`,
+                background: 'transparent',
+                border: 'none',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 position: 'relative', zIndex: 1, flexShrink: 0,
-                boxShadow: isCurrent ? '0 0 0 3px rgba(34,197,94,0.25)' : 'none',
-                transition: 'all 0.3s',
-                fontSize: '13px', lineHeight: 1,
-                filter: done ? 'none' : 'grayscale(1) opacity(0.55)',
+                fontSize: '17px', lineHeight: 1,
+                filter: done ? 'none' : 'grayscale(1) opacity(0.45)',
+                transition: 'filter 0.3s',
               }}>
                 {icon}
               </div>
@@ -690,7 +689,7 @@ const StepTracker = ({ status, dark = true }) => {
                 color: done ? (isCurrent ? '#22c55e' : (dark ? '#86efac' : '#16a34a')) : textColor,
                 textAlign: 'center', lineHeight: 1.3, maxWidth: 64, transition: 'color 0.3s',
               }}>
-                {label}
+                {icon} {label}
               </div>
             </div>
           );
