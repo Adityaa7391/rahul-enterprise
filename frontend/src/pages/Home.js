@@ -633,31 +633,33 @@ const STEPS = [
   { label: 'In Transit',       icon: 'transit' },
   { label: 'Out for Delivery', icon: 'outForDelivery' },
   { label: 'Delivered',        icon: 'delivered' },
+  { label: 'Returned',         icon: 'returned' },
 ];
 
 // Resolves any tracking-event status string to its icon name, covering
-// the 4 normal steps plus the Failed/Returned exceptions. Used wherever
-// a single event row needs its matching icon (e.g. the events timeline).
+// the normal steps plus the Failed exception. Used wherever a single
+// event row needs its matching icon (e.g. the events timeline).
 const iconForStatus = (status) => {
   const stepMatch = STEPS.find(s => s.label === status);
   if (stepMatch) return stepMatch.icon;
   if (status === 'Failed') return 'failed';
-  if (status === 'Returned') return 'returned';
   const idx = stepIndex(status);
   return idx >= 0 ? STEPS[idx].icon : 'booked';
 };
 
-// Exception states that fall outside the normal forward progression.
-// Each gets its own professional icon + color instead of joining the step line.
+// 'Failed' is the only remaining standalone exception — it gets its own
+// banner instead of joining the step line, since it doesn't represent
+// forward progress. 'Returned' now behaves like a normal step (see STEPS
+// and stepIndex above) so it renders on the step line just like Delivered.
 const EXCEPTION_STATUS_META = {
-  'Failed':   { icon: 'failed',   color: '#ef4444', label: 'Delivery Failed' },
-  'Returned': { icon: 'returned', color: '#a855f7', label: 'Returned to Sender' },
+  'Failed': { icon: 'failed', color: '#ef4444', label: 'Delivery Failed' },
 };
 
 const stepIndex = (status) => {
-  const map = { 'Booked': 0, 'In Transit': 1, 'Out for Delivery': 2, 'Delivered': 3 };
+  const map = { 'Booked': 0, 'In Transit': 1, 'Out for Delivery': 2, 'Delivered': 3, 'Returned': 4 };
   if (map[status] !== undefined) return map[status];
   const s = (status || '').toLowerCase();
+  if (s.includes('return')) return 4;
   if (s.includes('deliver') && s.includes('out')) return 2;
   if (s.includes('deliver')) return 3;
   if (s.includes('transit')) return 1;
@@ -671,8 +673,9 @@ const StepTracker = ({ status, dark = true }) => {
   const lineColor = dark ? 'rgba(255,255,255,0.12)' : '#e8e4dc';
   const exception = EXCEPTION_STATUS_META[status];
 
-  // Failed / Returned are exceptions outside the normal progression —
-  // show a dedicated banner instead of forcing them onto the step line.
+  // 'Failed' is the only exception outside the normal progression —
+  // show a dedicated banner instead of forcing it onto the step line.
+  // 'Returned' behaves like a normal step (it joins the line, see STEPS above).
   if (exception) {
     return (
       <div style={{
