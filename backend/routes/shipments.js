@@ -30,10 +30,12 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB per file, max 1 file
 });
 
-// Canonical forward order of the normal delivery lifecycle. 'Failed' and
-// 'Returned' are exception states, not steps in this line, so they are
-// handled separately (see below) and never hide other events.
-const STATUS_ORDER = ['Booked', 'Picked Up', 'In Transit', 'Out for Delivery', 'Delivered'];
+// Canonical forward order of the delivery lifecycle. 'Returned' now joins
+// this line (treated exactly like 'Delivered' for visibility purposes) so
+// setting it shows the full prior history, and moving status backward from
+// it correctly hides it again. 'Failed' remains a standalone exception that
+// never hides/unhides other events.
+const STATUS_ORDER = ['Booked', 'Picked Up', 'In Transit', 'Out for Delivery', 'Delivered', 'Returned'];
 
 // Strips out superseded events so customers only see the cleaned-up
 // timeline. Used for any response that is shown to the public/customer.
@@ -58,13 +60,13 @@ const toCustomerView = (shipmentDoc) => {
 const recomputeVisibility = (shipment, newStatus) => {
   const newIdx = STATUS_ORDER.indexOf(newStatus);
 
-  // 'Failed' / 'Returned' are exceptions outside the normal progression —
-  // don't hide/unhide anything based on them, just record the event.
+  // 'Failed' is the only remaining standalone exception — don't
+  // hide/unhide anything based on it, just record the event.
   if (newIdx === -1) return;
 
   shipment.trackingEvents.forEach((ev) => {
     const evIdx = STATUS_ORDER.indexOf(ev.status);
-    if (evIdx === -1) return; // leave Failed/Returned events untouched
+    if (evIdx === -1) return; // leave Failed events (and any unrecognized status) untouched
     ev.superseded = evIdx > newIdx;
   });
 };
