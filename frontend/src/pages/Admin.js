@@ -392,7 +392,7 @@ const AdminDashboard = () => {
   };
   const statusColor = {
     'Delivered':'#22c55e','In Transit':'#f48c06','Out for Delivery':'#3b82f6',
-    'Booked':'#9ca3af','Picked Up':'#e85d04','Failed':'#ef4444','Returned':'#8b5cf6',
+    'Booked':'#9ca3af','Picked Up':'#e85d04',
   };
   const filterBtnStyle = (active) => ({
     padding:'0.4rem 0.9rem', borderRadius:6, fontSize:'0.78rem', fontWeight:600,
@@ -737,8 +737,9 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
+              {/* ── Status filter buttons — Failed and Returned removed ── */}
               <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap', marginBottom:'1.2rem' }}>
-                {['all','Booked','Picked Up','In Transit','Out for Delivery','Delivered','Failed','Returned'].map(st => (
+                {['all','Booked','Picked Up','In Transit','Out for Delivery','Delivered'].map(st => (
                   <button key={st} onClick={() => setStatusFilter(st)} style={filterBtnStyle(statusFilter===st)}>
                     {st === 'all' ? 'All' : st}
                   </button>
@@ -819,7 +820,6 @@ const AdminDashboard = () => {
                             <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
                               {s.trackingId}
                               {s.images?.length > 0 ? (
-                                /* ── Professional image chip ── */
                                 <button
                                   onClick={() => openViewer(s)}
                                   title="View delivery photo"
@@ -833,7 +833,6 @@ const AdminDashboard = () => {
                                   onMouseEnter={e => { e.currentTarget.style.background='linear-gradient(135deg,rgba(34,197,94,.22),rgba(34,197,94,.12))'; e.currentTarget.style.borderColor='rgba(34,197,94,.6)'; }}
                                   onMouseLeave={e => { e.currentTarget.style.background='linear-gradient(135deg,rgba(34,197,94,.12),rgba(34,197,94,.06))'; e.currentTarget.style.borderColor='rgba(34,197,94,.35)'; }}
                                 >
-                                  {/* Mini thumbnail */}
                                   <div style={{ width:20, height:20, borderRadius:3, overflow:'hidden', flexShrink:0, border:'1px solid rgba(34,197,94,.3)' }}>
                                     <img
                                       src={resolveImageUrl(s.images[0].url)}
@@ -844,7 +843,6 @@ const AdminDashboard = () => {
                                   <span style={{ fontSize:'0.65rem', fontWeight:700, color:'#16a34a', letterSpacing:0.2 }}>
                                     POD
                                   </span>
-                                  {/* Green dot */}
                                   <span style={{ width:5, height:5, borderRadius:'50%', background:'#22c55e', display:'inline-block', flexShrink:0 }} />
                                 </button>
                               ) : null}
@@ -881,13 +879,14 @@ const AdminDashboard = () => {
                           </td>
                           <td style={{ padding:'0.8rem 1rem' }}>
                             <div style={{ display:'flex', gap:'0.4rem', alignItems:'center' }}>
+                              {/* ── Change Status dropdown — Failed and Returned removed ── */}
                               <select onChange={e => { if(e.target.value) updateShipmentStatus(s._id,e.target.value,s.destination); e.target.value=''; }} defaultValue=""
                                 style={{ padding:'0.35rem 0.5rem', border:'1px solid #e8e4dc', borderRadius:4, fontSize:'0.72rem', cursor:'pointer', outline:'none', maxWidth:130 }}>
                                 <option value="">Change Status</option>
-                                {['Picked Up','In Transit','Out for Delivery','Delivered','Failed','Returned'].map(st=><option key={st}>{st}</option>)}
+                                {['Picked Up','In Transit','Out for Delivery','Delivered'].map(st=><option key={st}>{st}</option>)}
                               </select>
 
-                              {/* ── Upload Image button ── */}
+                              {/* Upload Image button */}
                               <button
                                 onClick={() => openUploadModal(s)}
                                 disabled={s.status !== 'Delivered'}
