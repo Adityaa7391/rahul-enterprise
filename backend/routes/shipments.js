@@ -30,12 +30,8 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB per file, max 1 file
 });
 
-// Canonical forward order of the delivery lifecycle. 'Returned' now joins
-// this line (treated exactly like 'Delivered' for visibility purposes) so
-// setting it shows the full prior history, and moving status backward from
-// it correctly hides it again. 'Failed' remains a standalone exception that
-// never hides/unhides other events.
-const STATUS_ORDER = ['Booked', 'Picked Up', 'In Transit', 'Out for Delivery', 'Delivered', 'Returned'];
+// Canonical forward order of the delivery lifecycle.
+const STATUS_ORDER = ['Booked', 'Picked Up', 'In Transit', 'Out for Delivery', 'Delivered'];
 
 // Strips out superseded events so customers only see the cleaned-up
 // timeline. Used for any response that is shown to the public/customer.
@@ -49,24 +45,15 @@ const toCustomerView = (shipmentDoc) => {
 
 // Recomputes which tracking events should be visible to customers based
 // on the shipment's CURRENT status, not the order events were created in.
-//
-// Example: events were added Booked -> Picked Up -> In Transit -> Out for
-// Delivery, then the admin sets status back to "Picked Up". This function
-// marks the "In Transit" and "Out for Delivery" events as superseded so
-// customers only see Booked -> Picked Up. If the admin later moves forward
-// again (e.g. back to "In Transit"), any previously-superseded event that
-// is still at or before the new status is un-hidden again, instead of
-// creating a duplicate.
 const recomputeVisibility = (shipment, newStatus) => {
   const newIdx = STATUS_ORDER.indexOf(newStatus);
 
-  // 'Failed' is the only remaining standalone exception — don't
-  // hide/unhide anything based on it, just record the event.
+  // If status not in STATUS_ORDER (shouldn't happen now), don't touch anything
   if (newIdx === -1) return;
 
   shipment.trackingEvents.forEach((ev) => {
     const evIdx = STATUS_ORDER.indexOf(ev.status);
-    if (evIdx === -1) return; // leave Failed events (and any unrecognized status) untouched
+    if (evIdx === -1) return; // leave unrecognized status events untouched
     ev.superseded = evIdx > newIdx;
   });
 };
@@ -192,15 +179,13 @@ router.post('/:id/images', (req, res) => {
     try {
       const shipment = await Shipment.findById(req.params.id);
       if (!shipment) {
-        // Clean up uploaded files on Cloudinary if shipment not found
         if (req.files) req.files.forEach(f => cloudinary.uploader.destroy(f.filename).catch(() => {}));
         return res.status(404).json({ success: false, message: 'Shipment not found' });
       }
 
-      // Build image records pointing to the Cloudinary URL
       const newImages = (req.files || []).map(file => ({
-        url: file.path, // Cloudinary's secure URL
-        cloudinaryId: file.filename, // needed to delete from Cloudinary later
+        url: file.path,
+        cloudinaryId: file.filename,
         originalName: file.originalname,
         uploadedAt: new Date(),
       }));
@@ -209,7 +194,6 @@ router.post('/:id/images', (req, res) => {
         return res.status(400).json({ success: false, message: 'No valid images received.' });
       }
 
-      // Check total image limit (max 1 per shipment)
       const currentCount = shipment.images ? shipment.images.length : 0;
       const allowedCount = 1 - currentCount;
       if (allowedCount <= 0) {
@@ -248,7 +232,6 @@ router.delete('/:id/images/:imageId', async (req, res) => {
     const image = shipment.images.id(req.params.imageId);
     if (!image) return res.status(404).json({ success: false, message: 'Image not found' });
 
-    // Delete file from Cloudinary
     if (image.cloudinaryId) {
       cloudinary.uploader.destroy(image.cloudinaryId).catch((err) => {
         console.warn('Could not delete image from Cloudinary:', err.message);
@@ -316,7 +299,9 @@ router.put('/:id', async (req, res) => {
 router.put('/:id/status', async (req, res) => {
   try {
     const { status, location, description } = req.body;
-    const validStatuses = ['Booked','Picked Up','In Transit','Out for Delivery','Delivered','Failed','Returned'];
+
+    // Only these 5 statuses are now valid
+    const validStatuses = ['Booked', 'Picked Up', 'In Transit', 'Out for Delivery', 'Delivered'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
@@ -327,9 +312,8 @@ router.put('/:id/status', async (req, res) => {
     const now = new Date();
     shipment.trackingEvents = shipment.trackingEvents || [];
 
-    // If an event for this exact status already exists (e.g. admin moved
-    // forward, then back, then forward again to the same step), don't
-    // create a duplicate row — just refresh its details/timestamp.
+    // If an event for this exact status already exists, refresh it instead
+    // of creating a duplicate row.
     const existingEvent = shipment.trackingEvents.find(ev => ev.status === status);
     if (existingEvent) {
       existingEvent.location = location || existingEvent.location || 'Hub';
@@ -344,8 +328,6 @@ router.put('/:id/status', async (req, res) => {
       });
     }
 
-    // Hide every event that sits AFTER the newly-set status in the
-    // normal lifecycle order, and un-hide everything at or before it.
     recomputeVisibility(shipment, status);
 
     shipment.status = status;
@@ -367,7 +349,6 @@ router.delete('/:id', async (req, res) => {
     const shipment = await Shipment.findById(req.params.id);
     if (!shipment) return res.status(404).json({ success: false, message: 'Shipment not found' });
 
-    // Delete all images for this shipment from Cloudinary
     if (shipment.images && shipment.images.length > 0) {
       shipment.images.forEach(img => {
         if (img.cloudinaryId) {
