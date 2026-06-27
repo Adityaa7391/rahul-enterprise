@@ -585,9 +585,10 @@ const StatusIcon = ({ name, size = 16, color = 'currentColor' }) => {
   );
 };
 
-// ── 4 steps only now: Booked → In Transit → Out for Delivery → Delivered ──
+// 5 steps: Booked → Picked Up → In Transit → Out for Delivery → Delivered
 const STEPS = [
   { label: 'Booked',           icon: 'booked' },
+  { label: 'Picked Up',        icon: 'booked' },
   { label: 'In Transit',       icon: 'transit' },
   { label: 'Out for Delivery', icon: 'outForDelivery' },
   { label: 'Delivered',        icon: 'delivered' },
@@ -600,16 +601,16 @@ const iconForStatus = (status) => {
   return idx >= 0 ? STEPS[idx].icon : 'booked';
 };
 
-// stepIndex now maps only the 4 active statuses (+ Picked Up → step 0)
+// Maps each status to its position in the STEPS bar (0–4)
 const stepIndex = (status) => {
-  const map = { 'Booked': 0, 'Picked Up': 0, 'In Transit': 1, 'Out for Delivery': 2, 'Delivered': 3 };
-  if (map[status] !== undefined) return map[status];
-  const s = (status || '').toLowerCase();
-  if (s.includes('deliver') && s.includes('out')) return 2;
-  if (s.includes('deliver')) return 3;
-  if (s.includes('transit')) return 1;
-  if (s.includes('pick') || s.includes('book')) return 0;
-  return -1;
+  const map = {
+    'Booked': 0,
+    'Picked Up': 1,
+    'In Transit': 2,
+    'Out for Delivery': 3,
+    'Delivered': 4,
+  };
+  return map[status] !== undefined ? map[status] : -1;
 };
 
 const StepTracker = ({ status, dark = true }) => {
@@ -774,11 +775,11 @@ const SlidingTracker = () => {
               <div style={{ fontSize:'0.82rem', color:'#9ca3af', marginBottom:'0.5rem' }}>{result.origin} → {result.destination} · {result.serviceType}</div>
               <StepTracker status={result.status} dark={true} />
               <div style={{ marginTop:'1.25rem' }}>
-                {result.trackingEvents?.map((ev, i) => (
+                {result.trackingEvents?.filter(ev => !ev.superseded).map((ev, i, arr) => (
                   <div key={i} style={{ display:'flex', gap:14, position:'relative' }}>
-                    {i < result.trackingEvents.length-1 && <div style={{ position:'absolute', left:9, top:22, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />}
+                    {i < arr.length-1 && <div style={{ position:'absolute', left:9, top:22, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />}
                     <div style={{ width:20, height:20, borderRadius:'50%', flexShrink:0, marginTop:2, background:'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      {i < result.trackingEvents.length-1 && <svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>}
+                      {i < arr.length-1 && <svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>}
                     </div>
                     <div style={{ paddingBottom:18 }}>
                       <div style={{ fontSize:'0.84rem', fontWeight:600, color:'white', display:'flex', alignItems:'center', gap:6 }}>
@@ -903,13 +904,13 @@ const Hero = () => {
               <div style={{ fontSize:'0.78rem', color:'#9ca3af', marginBottom:'0.25rem' }}>{result.origin} → {result.destination} · {result.serviceType}</div>
               <StepTracker status={result.status} dark={true} />
               <div style={{ marginTop:'1rem' }}>
-                {result.trackingEvents?.map((ev, i) => (
+                {result.trackingEvents?.filter(ev => !ev.superseded).map((ev, i, arr) => (
                   <div key={i} style={{ display:'flex', gap:12, position:'relative' }}>
-                    {i < result.trackingEvents.length-1 && (
+                    {i < arr.length-1 && (
                       <div style={{ position:'absolute', left:8, top:20, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />
                     )}
                     <div style={{ width:18, height:18, borderRadius:'50%', flexShrink:0, marginTop:2, background:'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      {i < result.trackingEvents.length-1 && (
+                      {i < arr.length-1 && (
                         <svg viewBox="0 0 24 24" width="9" height="9" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
                       )}
                     </div>
