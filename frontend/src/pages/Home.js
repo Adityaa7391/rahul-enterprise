@@ -162,7 +162,6 @@ const Sub = ({ c, light }) => (
   <p style={{ color: light?'#9ca3af':'#6b7280', fontSize:'1rem', lineHeight:1.75, maxWidth:560 }}>{c}</p>
 );
 
-// Resolve a stored image URL to a full URL served by the backend
 const resolveImageUrl = (url) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
@@ -184,10 +183,7 @@ const fmtDateOnly = (val) => {
   return d.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
 };
 
-/* ─── PDF GENERATION (client-side, via jsPDF loaded from CDN) ──────
-   Loads jsPDF only once and caches the promise so multiple buttons
-   on the page don't each inject the script separately.
-─────────────────────────────────────────────────────────────────── */
+/* ─── PDF GENERATION ────────────────────────────────────────────── */
 let jsPDFLoaderPromise = null;
 const loadJsPDF = () => {
   if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
@@ -210,7 +206,6 @@ const loadJsPDF = () => {
   return jsPDFLoaderPromise;
 };
 
-// Fetch an image URL and convert it to a base64 data URL (needed for jsPDF embedding)
 const imageUrlToDataURL = (url) => new Promise((resolve) => {
   const img = new Image();
   img.crossOrigin = 'Anonymous';
@@ -223,18 +218,13 @@ const imageUrlToDataURL = (url) => new Promise((resolve) => {
       ctx.drawImage(img, 0, 0);
       resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.92), width: img.naturalWidth, height: img.naturalHeight });
     } catch (e) {
-      resolve(null); // CORS or canvas tainted — skip embedding image, PDF still generates
+      resolve(null);
     }
   };
   img.onerror = () => resolve(null);
   img.src = url;
 });
 
-/**
- * Builds and downloads a PDF containing every shipment detail
- * (the same data captured in the admin "Add Shipment" form)
- * plus the uploaded shipment image, if available.
- */
 const generateShipmentPDF = async (shipment) => {
   const jsPDFCtor = await loadJsPDF();
   const doc = new jsPDFCtor({ unit: 'pt', format: 'a4' });
@@ -243,8 +233,7 @@ const generateShipmentPDF = async (shipment) => {
   const marginX = 48;
   let y = 56;
 
-  // ── Header band ──
-  doc.setFillColor(10, 22, 40); // #0a1628
+  doc.setFillColor(10, 22, 40);
   doc.rect(0, 0, pageWidth, 86, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
@@ -261,11 +250,10 @@ const generateShipmentPDF = async (shipment) => {
   y = 116;
   doc.setTextColor(20, 20, 20);
 
-  // ── Status badge ──
   const status = shipment.status || 'Booked';
   const statusColors = {
     'Delivered':[34,197,94], 'In Transit':[232,93,4], 'Out for Delivery':[59,130,246],
-    'Picked Up':[244,140,6], 'Booked':[156,163,175], 'Failed':[239,68,68], 'Returned':[139,92,246],
+    'Picked Up':[244,140,6], 'Booked':[156,163,175],
   };
   const [r,g,b] = statusColors[status] || [156,163,175];
   doc.setFillColor(r,g,b);
@@ -285,7 +273,6 @@ const generateShipmentPDF = async (shipment) => {
   doc.line(marginX, y, pageWidth - marginX, y);
   y += 26;
 
-  // ── Detail rows helper ──
   const fieldRow = (label, value) => {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
@@ -319,7 +306,6 @@ const generateShipmentPDF = async (shipment) => {
   if (shipment.weight) twoColRow('Weight', shipment.weight, 'GPS Enabled', shipment.gpsEnabled ? 'Yes' : 'No');
   if (shipment.description) fieldRow('Description', shipment.description);
 
-  // ── Tracking history ──
   if (shipment.trackingEvents?.length) {
     y += 8;
     doc.setDrawColor(225, 225, 225);
@@ -353,7 +339,6 @@ const generateShipmentPDF = async (shipment) => {
     });
   }
 
-  // ── Shipment image ──
   const firstImage = shipment.images?.[0];
   if (firstImage) {
     if (y > 560) { doc.addPage(); y = 56; }
@@ -387,7 +372,6 @@ const generateShipmentPDF = async (shipment) => {
     }
   }
 
-  // ── Footer ──
   const pageCount = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
@@ -401,11 +385,6 @@ const generateShipmentPDF = async (shipment) => {
   doc.save(`Shipment_${shipment.trackingId || 'Info'}.pdf`);
 };
 
-/**
- * Downloads the shipment's uploaded photo directly as an image file
- * (separate from the PDF info sheet). Fetches it as a blob so the
- * browser saves it rather than navigating to it.
- */
 const downloadShipmentImage = async (shipment) => {
   const photo = shipment?.images?.[0];
   if (!photo) throw new Error('No image available for this shipment.');
@@ -413,11 +392,8 @@ const downloadShipmentImage = async (shipment) => {
   const response = await fetch(url);
   if (!response.ok) throw new Error('Could not fetch image.');
   const blob = await response.blob();
-
-  // Preserve original extension where possible, default to jpg
   const extMatch = (photo.originalName || photo.url || '').match(/\.(jpg|jpeg|png|webp|gif)$/i);
   const ext = extMatch ? extMatch[1].toLowerCase() : 'jpg';
-
   const blobUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = blobUrl;
@@ -428,13 +404,6 @@ const downloadShipmentImage = async (shipment) => {
   URL.revokeObjectURL(blobUrl);
 };
 
-/**
- * Combined download actions shown inside every tracking result card:
- * - "Download Info (PDF)" — always available, full shipment info sheet
- * - "Download Photo" — only shown when the shipment has an uploaded image,
- *   downloads that exact photo as a standalone image file
- * Each button manages its own busy/error state independently.
- */
 const DownloadActions = ({ shipment }) => {
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfErr, setPdfErr] = useState('');
@@ -472,8 +441,6 @@ const DownloadActions = ({ shipment }) => {
   return (
     <>
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:'0.6rem' }}>
-        
-
         {hasPhoto && (
           <button onClick={handlePhotoClick} disabled={imgBusy} className="re-download-btn" style={{ flex:'1 1 0', marginTop: 0 }}>
             {imgBusy ? (
@@ -493,14 +460,6 @@ const DownloadActions = ({ shipment }) => {
   );
 };
 
-/**
- * Professional, structured panel showing every shipment detail captured
- * in the admin "Add Shipment" form — CN/Challan numbers, route, service
- * type, dispatch & expected delivery dates — plus the uploaded shipment
- * photo, shown inline (not just downloadable) with a click-to-enlarge
- * lightbox. Reused across Hero and SlidingTracker so
- * every public tracking result looks consistent.
- */
 const ShipmentDetailCard = ({ shipment, compact = false }) => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   if (!shipment) return null;
@@ -617,8 +576,6 @@ const StatusIcon = ({ name, size = 16, color = 'currentColor' }) => {
     transit: <path d="M3 7h11v8H3zM14 10h4l3 3v2h-7zM6.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM17.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />,
     outForDelivery: <path d="M5 17h2.5a1.5 1.5 0 1 1-3 0H1V6a1 1 0 0 1 1-1h12v4 M14 9h4l3 3.5V17h-2.5a1.5 1.5 0 1 1-3 0H8 M1 10h7 M1 13h5" />,
     delivered: <path d="M9 12l2 2 4-4 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z" />,
-    failed: <path d="M12 9v4 M12 16.5h.01 M10.3 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.7 3.86a2 2 0 0 0-3.4 0z" />,
-    returned: <path d="M9 14L4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,
     pod: <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M9 15l2 2 4-4" />,
   };
   return (
@@ -628,38 +585,26 @@ const StatusIcon = ({ name, size = 16, color = 'currentColor' }) => {
   );
 };
 
+// ── 4 steps only now: Booked → In Transit → Out for Delivery → Delivered ──
 const STEPS = [
   { label: 'Booked',           icon: 'booked' },
   { label: 'In Transit',       icon: 'transit' },
   { label: 'Out for Delivery', icon: 'outForDelivery' },
   { label: 'Delivered',        icon: 'delivered' },
-  { label: 'Returned',         icon: 'returned' },
 ];
 
-// Resolves any tracking-event status string to its icon name, covering
-// the normal steps plus the Failed exception. Used wherever a single
-// event row needs its matching icon (e.g. the events timeline).
 const iconForStatus = (status) => {
   const stepMatch = STEPS.find(s => s.label === status);
   if (stepMatch) return stepMatch.icon;
-  if (status === 'Failed') return 'failed';
   const idx = stepIndex(status);
   return idx >= 0 ? STEPS[idx].icon : 'booked';
 };
 
-// 'Failed' is the only remaining standalone exception — it gets its own
-// banner instead of joining the step line, since it doesn't represent
-// forward progress. 'Returned' now behaves like a normal step (see STEPS
-// and stepIndex above) so it renders on the step line just like Delivered.
-const EXCEPTION_STATUS_META = {
-  'Failed': { icon: 'failed', color: '#ef4444', label: 'Delivery Failed' },
-};
-
+// stepIndex now maps only the 4 active statuses (+ Picked Up → step 0)
 const stepIndex = (status) => {
-  const map = { 'Booked': 0, 'In Transit': 1, 'Out for Delivery': 2, 'Delivered': 3, 'Returned': 4 };
+  const map = { 'Booked': 0, 'Picked Up': 0, 'In Transit': 1, 'Out for Delivery': 2, 'Delivered': 3 };
   if (map[status] !== undefined) return map[status];
   const s = (status || '').toLowerCase();
-  if (s.includes('return')) return 4;
   if (s.includes('deliver') && s.includes('out')) return 2;
   if (s.includes('deliver')) return 3;
   if (s.includes('transit')) return 1;
@@ -671,24 +616,6 @@ const StepTracker = ({ status, dark = true }) => {
   const activeIdx = stepIndex(status);
   const textColor = dark ? '#9ca3af' : '#6b7280';
   const lineColor = dark ? 'rgba(255,255,255,0.12)' : '#e8e4dc';
-  const exception = EXCEPTION_STATUS_META[status];
-
-  // 'Failed' is the only exception outside the normal progression —
-  // show a dedicated banner instead of forcing it onto the step line.
-  // 'Returned' behaves like a normal step (it joins the line, see STEPS above).
-  if (exception) {
-    return (
-      <div style={{
-        marginTop: '1.25rem', marginBottom: '0.5rem',
-        display: 'flex', alignItems: 'center', gap: 10,
-        background: `${exception.color}14`, border: `1px solid ${exception.color}40`,
-        borderRadius: 10, padding: '0.85rem 1rem',
-      }}>
-        <StatusIcon name={exception.icon} size={20} color={exception.color} />
-        <span style={{ color: exception.color, fontWeight: 700, fontSize: '0.85rem' }}>{exception.label}</span>
-      </div>
-    );
-  }
 
   return (
     <div style={{ marginTop: '1.25rem', marginBottom: '0.5rem' }}>
@@ -755,7 +682,11 @@ const SlidingTracker = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const statusColors = { 'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6','Picked Up':'#f48c06','Booked':'#9ca3af','Failed':'#ef4444' };
+  // Failed and Returned removed from statusColors
+  const statusColors = {
+    'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6',
+    'Picked Up':'#f48c06','Booked':'#9ca3af',
+  };
 
   const handleTrack = async () => {
     if (!tid.trim()) return;
@@ -876,14 +807,17 @@ const SlidingTracker = () => {
 };
 
 /* ─── HERO ──────────────────────────────────────────────────────── */
-
 const Hero = () => {
   const [tid, setTid] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
-  const statusColors = { 'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6','Picked Up':'#f48c06','Booked':'#9ca3af','Failed':'#ef4444' };
+  // Failed and Returned removed from statusColors
+  const statusColors = {
+    'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6',
+    'Picked Up':'#f48c06','Booked':'#9ca3af',
+  };
 
   const handleTrack = async (id) => {
     const trackId = (id || tid).trim();
@@ -1009,7 +943,6 @@ const Hero = () => {
   );
 };
 
-
 /* ─── SERVICES ──────────────────────────────────────────────────── */
 const SvcIcon = ({ d }) => (
   <svg viewBox="0 0 24 24" width="28" height="28" fill="#e85d04"><path d={d} /></svg>
@@ -1092,7 +1025,6 @@ const WhyChooseUs = () => (
    COVERAGE SECTION
    ═══════════════════════════════════════════════════════════════ */
 const CoverageSection = () => {
-  // ── Simple state list shown on the right side of the map card ──
   const COVERAGE_STATES = [
     'West Bengal (Origin Hub)',
     'Bihar',
@@ -1119,8 +1051,6 @@ const CoverageSection = () => {
         <Sub c="Complete coverage across West Bengal, Bihar, Jharkhand, Odisha, Assam and the wider Northeast — every state, every city, door to door." light />
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:16, padding:12, background:'#050e1a', borderRadius:16, marginTop:'3rem' }} className="cover-grid">
-
-          {/* ── MAP IMAGE PANEL ── */}
           <div style={{ background:'#0b1a30', borderRadius:12, border:'1px solid rgba(255,255,255,.07)', overflow:'hidden', position:'relative' }}>
             <div style={{ display:'flex', alignItems:'center', gap:8, padding:'11px 15px 9px', borderBottom:'1px solid rgba(255,255,255,.06)' }}>
               <span className="re-blink-dot" style={{ width:7, height:7, borderRadius:'50%', background:'#e85d04', display:'inline-block', flexShrink:0 }} />
@@ -1133,7 +1063,6 @@ const CoverageSection = () => {
             <img src="/map3.jpeg" alt="India East Zone Coverage Map" style={{ width:'100%', display:'block', objectFit:'cover', objectPosition:'center top' }} />
           </div>
 
-          {/* ── INFO PANEL ── */}
           <div style={{ background:'#0b1a30', borderRadius:12, border:'1px solid rgba(255,255,255,.07)', padding:15, display:'flex', flexDirection:'column', gap:8, overflowY:'auto' }}>
             <div style={{ fontSize:19, fontWeight:800, color:'white', lineHeight:1.15, paddingBottom:9, borderBottom:'1px solid rgba(255,255,255,.07)' }}>
               EAST INDIA<br/>
@@ -1213,8 +1142,6 @@ const Contact = () => {
         <Sub c="Share your requirements and we'll send a full proposal with GE-standard compliance details." light />
 
         <div className="two-col" style={{ display:'grid', gridTemplateColumns:'1fr 1.25fr', gap:'4rem', marginTop:'3rem' }}>
-
-          {/* ── LEFT: Contact Details ── */}
           <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
             {contactDetails.map(({ icon, label, lines }) => (
               <div key={label} className="re-contact-info-item">
@@ -1236,7 +1163,6 @@ const Contact = () => {
             </div>
           </div>
 
-          {/* ── RIGHT: Contact Form ── */}
           <div style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.09)', borderRadius:16, padding:'2rem' }}>
             <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.3rem', color:'white', marginBottom:'1.5rem', letterSpacing:0.5 }}>Send a Request</div>
 
