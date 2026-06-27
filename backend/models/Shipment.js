@@ -39,7 +39,7 @@ const ShipmentSchema = new mongoose.Schema({
   weight: Number, description: String,
   status: {
     type: String,
-    enum: ['Booked','Picked Up','In Transit','Out for Delivery','Delivered','Failed','Returned'],
+    enum: ['Booked','Picked Up','In Transit','Out for Delivery','Delivered'],
     default: 'Booked'
   },
   gpsEnabled:     { type: Boolean, default: false },
