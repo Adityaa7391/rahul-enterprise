@@ -162,6 +162,7 @@ const Sub = ({ c, light }) => (
   <p style={{ color: light?'#9ca3af':'#6b7280', fontSize:'1rem', lineHeight:1.75, maxWidth:560 }}>{c}</p>
 );
 
+// Resolve a stored image URL to a full URL served by the backend
 const resolveImageUrl = (url) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
@@ -183,7 +184,10 @@ const fmtDateOnly = (val) => {
   return d.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
 };
 
-/* ─── PDF GENERATION ────────────────────────────────────────────── */
+/* ─── PDF GENERATION (client-side, via jsPDF loaded from CDN) ──────
+   Loads jsPDF only once and caches the promise so multiple buttons
+   on the page don't each inject the script separately.
+─────────────────────────────────────────────────────────────────── */
 let jsPDFLoaderPromise = null;
 const loadJsPDF = () => {
   if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
@@ -206,6 +210,7 @@ const loadJsPDF = () => {
   return jsPDFLoaderPromise;
 };
 
+// Fetch an image URL and convert it to a base64 data URL (needed for jsPDF embedding)
 const imageUrlToDataURL = (url) => new Promise((resolve) => {
   const img = new Image();
   img.crossOrigin = 'Anonymous';
@@ -218,13 +223,18 @@ const imageUrlToDataURL = (url) => new Promise((resolve) => {
       ctx.drawImage(img, 0, 0);
       resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.92), width: img.naturalWidth, height: img.naturalHeight });
     } catch (e) {
-      resolve(null);
+      resolve(null); // CORS or canvas tainted — skip embedding image, PDF still generates
     }
   };
   img.onerror = () => resolve(null);
   img.src = url;
 });
 
+/**
+ * Builds and downloads a PDF containing every shipment detail
+ * (the same data captured in the admin "Add Shipment" form)
+ * plus the uploaded shipment image, if available.
+ */
 const generateShipmentPDF = async (shipment) => {
   const jsPDFCtor = await loadJsPDF();
   const doc = new jsPDFCtor({ unit: 'pt', format: 'a4' });
@@ -233,7 +243,8 @@ const generateShipmentPDF = async (shipment) => {
   const marginX = 48;
   let y = 56;
 
-  doc.setFillColor(10, 22, 40);
+  // ── Header band ──
+  doc.setFillColor(10, 22, 40); // #0a1628
   doc.rect(0, 0, pageWidth, 86, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
@@ -250,6 +261,7 @@ const generateShipmentPDF = async (shipment) => {
   y = 116;
   doc.setTextColor(20, 20, 20);
 
+  // ── Status badge ──
   const status = shipment.status || 'Booked';
   const statusColors = {
     'Delivered':[34,197,94], 'In Transit':[232,93,4], 'Out for Delivery':[59,130,246],
@@ -273,6 +285,7 @@ const generateShipmentPDF = async (shipment) => {
   doc.line(marginX, y, pageWidth - marginX, y);
   y += 26;
 
+  // ── Detail rows helper ──
   const fieldRow = (label, value) => {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
@@ -306,6 +319,7 @@ const generateShipmentPDF = async (shipment) => {
   if (shipment.weight) twoColRow('Weight', shipment.weight, 'GPS Enabled', shipment.gpsEnabled ? 'Yes' : 'No');
   if (shipment.description) fieldRow('Description', shipment.description);
 
+  // ── Tracking history ──
   if (shipment.trackingEvents?.length) {
     y += 8;
     doc.setDrawColor(225, 225, 225);
@@ -339,6 +353,7 @@ const generateShipmentPDF = async (shipment) => {
     });
   }
 
+  // ── Shipment image ──
   const firstImage = shipment.images?.[0];
   if (firstImage) {
     if (y > 560) { doc.addPage(); y = 56; }
@@ -372,6 +387,7 @@ const generateShipmentPDF = async (shipment) => {
     }
   }
 
+  // ── Footer ──
   const pageCount = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
@@ -385,6 +401,11 @@ const generateShipmentPDF = async (shipment) => {
   doc.save(`Shipment_${shipment.trackingId || 'Info'}.pdf`);
 };
 
+/**
+ * Downloads the shipment's uploaded photo directly as an image file
+ * (separate from the PDF info sheet). Fetches it as a blob so the
+ * browser saves it rather than navigating to it.
+ */
 const downloadShipmentImage = async (shipment) => {
   const photo = shipment?.images?.[0];
   if (!photo) throw new Error('No image available for this shipment.');
@@ -392,8 +413,11 @@ const downloadShipmentImage = async (shipment) => {
   const response = await fetch(url);
   if (!response.ok) throw new Error('Could not fetch image.');
   const blob = await response.blob();
+
+  // Preserve original extension where possible, default to jpg
   const extMatch = (photo.originalName || photo.url || '').match(/\.(jpg|jpeg|png|webp|gif)$/i);
   const ext = extMatch ? extMatch[1].toLowerCase() : 'jpg';
+
   const blobUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = blobUrl;
@@ -404,6 +428,13 @@ const downloadShipmentImage = async (shipment) => {
   URL.revokeObjectURL(blobUrl);
 };
 
+/**
+ * Combined download actions shown inside every tracking result card:
+ * - "Download Info (PDF)" — always available, full shipment info sheet
+ * - "Download Photo" — only shown when the shipment has an uploaded image,
+ *   downloads that exact photo as a standalone image file
+ * Each button manages its own busy/error state independently.
+ */
 const DownloadActions = ({ shipment }) => {
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfErr, setPdfErr] = useState('');
@@ -441,6 +472,8 @@ const DownloadActions = ({ shipment }) => {
   return (
     <>
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:'0.6rem' }}>
+        
+
         {hasPhoto && (
           <button onClick={handlePhotoClick} disabled={imgBusy} className="re-download-btn" style={{ flex:'1 1 0', marginTop: 0 }}>
             {imgBusy ? (
@@ -460,6 +493,14 @@ const DownloadActions = ({ shipment }) => {
   );
 };
 
+/**
+ * Professional, structured panel showing every shipment detail captured
+ * in the admin "Add Shipment" form — CN/Challan numbers, route, service
+ * type, dispatch & expected delivery dates — plus the uploaded shipment
+ * photo, shown inline (not just downloadable) with a click-to-enlarge
+ * lightbox. Reused across Hero and SlidingTracker so
+ * every public tracking result looks consistent.
+ */
 const ShipmentDetailCard = ({ shipment, compact = false }) => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   if (!shipment) return null;
@@ -585,15 +626,14 @@ const StatusIcon = ({ name, size = 16, color = 'currentColor' }) => {
   );
 };
 
-// 5 steps: Booked → Picked Up → In Transit → Out for Delivery → Delivered
 const STEPS = [
   { label: 'Booked',           icon: 'booked' },
-  { label: 'Picked Up',        icon: 'booked' },
   { label: 'In Transit',       icon: 'transit' },
   { label: 'Out for Delivery', icon: 'outForDelivery' },
   { label: 'Delivered',        icon: 'delivered' },
 ];
 
+// Resolves any tracking-event status string to its icon name.
 const iconForStatus = (status) => {
   const stepMatch = STEPS.find(s => s.label === status);
   if (stepMatch) return stepMatch.icon;
@@ -601,16 +641,15 @@ const iconForStatus = (status) => {
   return idx >= 0 ? STEPS[idx].icon : 'booked';
 };
 
-// Maps each status to its position in the STEPS bar (0–4)
 const stepIndex = (status) => {
-  const map = {
-    'Booked': 0,
-    'Picked Up': 1,
-    'In Transit': 2,
-    'Out for Delivery': 3,
-    'Delivered': 4,
-  };
-  return map[status] !== undefined ? map[status] : -1;
+  const map = { 'Booked': 0, 'In Transit': 1, 'Out for Delivery': 2, 'Delivered': 3 };
+  if (map[status] !== undefined) return map[status];
+  const s = (status || '').toLowerCase();
+  if (s.includes('deliver') && s.includes('out')) return 2;
+  if (s.includes('deliver')) return 3;
+  if (s.includes('transit')) return 1;
+  if (s.includes('pick') || s.includes('book')) return 0;
+  return -1;
 };
 
 const StepTracker = ({ status, dark = true }) => {
@@ -683,11 +722,7 @@ const SlidingTracker = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  // Failed and Returned removed from statusColors
-  const statusColors = {
-    'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6',
-    'Picked Up':'#f48c06','Booked':'#9ca3af',
-  };
+  const statusColors = { 'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6','Picked Up':'#f48c06','Booked':'#9ca3af' };
 
   const handleTrack = async () => {
     if (!tid.trim()) return;
@@ -775,11 +810,11 @@ const SlidingTracker = () => {
               <div style={{ fontSize:'0.82rem', color:'#9ca3af', marginBottom:'0.5rem' }}>{result.origin} → {result.destination} · {result.serviceType}</div>
               <StepTracker status={result.status} dark={true} />
               <div style={{ marginTop:'1.25rem' }}>
-                {result.trackingEvents?.filter(ev => !ev.superseded).map((ev, i, arr) => (
+                {result.trackingEvents?.map((ev, i) => (
                   <div key={i} style={{ display:'flex', gap:14, position:'relative' }}>
-                    {i < arr.length-1 && <div style={{ position:'absolute', left:9, top:22, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />}
+                    {i < result.trackingEvents.length-1 && <div style={{ position:'absolute', left:9, top:22, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />}
                     <div style={{ width:20, height:20, borderRadius:'50%', flexShrink:0, marginTop:2, background:'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      {i < arr.length-1 && <svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>}
+                      {i < result.trackingEvents.length-1 && <svg viewBox="0 0 24 24" width="10" height="10" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>}
                     </div>
                     <div style={{ paddingBottom:18 }}>
                       <div style={{ fontSize:'0.84rem', fontWeight:600, color:'white', display:'flex', alignItems:'center', gap:6 }}>
@@ -808,17 +843,14 @@ const SlidingTracker = () => {
 };
 
 /* ─── HERO ──────────────────────────────────────────────────────── */
+
 const Hero = () => {
   const [tid, setTid] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
-  // Failed and Returned removed from statusColors
-  const statusColors = {
-    'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6',
-    'Picked Up':'#f48c06','Booked':'#9ca3af',
-  };
+  const statusColors = { 'Delivered':'#22c55e','In Transit':'#e85d04','Out for Delivery':'#3b82f6','Picked Up':'#f48c06','Booked':'#9ca3af' };
 
   const handleTrack = async (id) => {
     const trackId = (id || tid).trim();
@@ -904,13 +936,13 @@ const Hero = () => {
               <div style={{ fontSize:'0.78rem', color:'#9ca3af', marginBottom:'0.25rem' }}>{result.origin} → {result.destination} · {result.serviceType}</div>
               <StepTracker status={result.status} dark={true} />
               <div style={{ marginTop:'1rem' }}>
-                {result.trackingEvents?.filter(ev => !ev.superseded).map((ev, i, arr) => (
+                {result.trackingEvents?.map((ev, i) => (
                   <div key={i} style={{ display:'flex', gap:12, position:'relative' }}>
-                    {i < arr.length-1 && (
+                    {i < result.trackingEvents.length-1 && (
                       <div style={{ position:'absolute', left:8, top:20, width:1, height:'calc(100%)', background:'rgba(255,255,255,.1)' }} />
                     )}
                     <div style={{ width:18, height:18, borderRadius:'50%', flexShrink:0, marginTop:2, background:'#22c55e', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      {i < arr.length-1 && (
+                      {i < result.trackingEvents.length-1 && (
                         <svg viewBox="0 0 24 24" width="9" height="9" fill="white"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
                       )}
                     </div>
@@ -943,6 +975,7 @@ const Hero = () => {
     </section>
   );
 };
+
 
 /* ─── SERVICES ──────────────────────────────────────────────────── */
 const SvcIcon = ({ d }) => (
@@ -1026,6 +1059,7 @@ const WhyChooseUs = () => (
    COVERAGE SECTION
    ═══════════════════════════════════════════════════════════════ */
 const CoverageSection = () => {
+  // ── Simple state list shown on the right side of the map card ──
   const COVERAGE_STATES = [
     'West Bengal (Origin Hub)',
     'Bihar',
@@ -1052,6 +1086,8 @@ const CoverageSection = () => {
         <Sub c="Complete coverage across West Bengal, Bihar, Jharkhand, Odisha, Assam and the wider Northeast — every state, every city, door to door." light />
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:16, padding:12, background:'#050e1a', borderRadius:16, marginTop:'3rem' }} className="cover-grid">
+
+          {/* ── MAP IMAGE PANEL ── */}
           <div style={{ background:'#0b1a30', borderRadius:12, border:'1px solid rgba(255,255,255,.07)', overflow:'hidden', position:'relative' }}>
             <div style={{ display:'flex', alignItems:'center', gap:8, padding:'11px 15px 9px', borderBottom:'1px solid rgba(255,255,255,.06)' }}>
               <span className="re-blink-dot" style={{ width:7, height:7, borderRadius:'50%', background:'#e85d04', display:'inline-block', flexShrink:0 }} />
@@ -1064,6 +1100,7 @@ const CoverageSection = () => {
             <img src="/map3.jpeg" alt="India East Zone Coverage Map" style={{ width:'100%', display:'block', objectFit:'cover', objectPosition:'center top' }} />
           </div>
 
+          {/* ── INFO PANEL ── */}
           <div style={{ background:'#0b1a30', borderRadius:12, border:'1px solid rgba(255,255,255,.07)', padding:15, display:'flex', flexDirection:'column', gap:8, overflowY:'auto' }}>
             <div style={{ fontSize:19, fontWeight:800, color:'white', lineHeight:1.15, paddingBottom:9, borderBottom:'1px solid rgba(255,255,255,.07)' }}>
               EAST INDIA<br/>
@@ -1143,6 +1180,8 @@ const Contact = () => {
         <Sub c="Share your requirements and we'll send a full proposal with GE-standard compliance details." light />
 
         <div className="two-col" style={{ display:'grid', gridTemplateColumns:'1fr 1.25fr', gap:'4rem', marginTop:'3rem' }}>
+
+          {/* ── LEFT: Contact Details ── */}
           <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
             {contactDetails.map(({ icon, label, lines }) => (
               <div key={label} className="re-contact-info-item">
@@ -1164,6 +1203,7 @@ const Contact = () => {
             </div>
           </div>
 
+          {/* ── RIGHT: Contact Form ── */}
           <div style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.09)', borderRadius:16, padding:'2rem' }}>
             <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:'1.3rem', color:'white', marginBottom:'1.5rem', letterSpacing:0.5 }}>Send a Request</div>
 
