@@ -34,11 +34,22 @@ const upload = multer({
 const STATUS_ORDER = ['Booked', 'Picked Up', 'In Transit', 'Out for Delivery', 'Delivered'];
 
 // Strips out superseded events so customers only see the cleaned-up
-// timeline. Used for any response that is shown to the public/customer.
+// timeline, AND sorts by lifecycle step order (not by timestamp).
+//
+// Why sort by STATUS_ORDER instead of timestamp: when the admin moves a
+// shipment's status backward and then forward again, the event for the
+// re-selected status gets its `timestamp` refreshed to "now" (see
+// PUT /:id/status below). If we sorted by timestamp, that event would
+// jump to the end of the list even though it belongs earlier in the
+// sequence. Sorting by STATUS_ORDER guarantees the customer always sees
+// a clean, step-wise progression — only the steps up to the current
+// status, in the correct order, nothing extra.
 const toCustomerView = (shipmentDoc) => {
   const obj = shipmentDoc.toObject ? shipmentDoc.toObject() : shipmentDoc;
   if (Array.isArray(obj.trackingEvents)) {
-    obj.trackingEvents = obj.trackingEvents.filter(ev => !ev.superseded);
+    obj.trackingEvents = obj.trackingEvents
+      .filter(ev => !ev.superseded)
+      .sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
   }
   return obj;
 };
