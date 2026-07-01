@@ -33,46 +33,63 @@ const upload = multer({
 // Canonical forward order of the delivery lifecycle.
 const STATUS_ORDER = ['Booked', 'Picked Up', 'In Transit', 'Out for Delivery', 'Delivered'];
 
-// Strips out superseded events so customers only see the cleaned-up
-// timeline, AND sorts by lifecycle step order (not by timestamp).
+// Builds the customer-facing timeline from scratch every time, based
+// purely on the shipment's CURRENT status — not on which events happen
+// to exist in the DB or when they were last touched.
 //
-// Why sort by STATUS_ORDER instead of timestamp: when the admin moves a
-// shipment's status backward and then forward again, the event for the
-// re-selected status gets its `timestamp` refreshed to "now" (see
-// PUT /:id/status below). If we sorted by timestamp, that event would
-// jump to the end of the list even though it belongs earlier in the
-// sequence. Sorting by STATUS_ORDER guarantees the customer always sees
-// a clean, step-wise progression — only the steps up to the current
-// status, in the correct order, nothing extra.
+// Rules this implements (exactly what should show on the tracking page):
+//   1. Only steps from "Booked" up to the CURRENT status are shown.
+//      Nothing beyond the current status is ever shown.
+//   2. If a step in that range was skipped in real life (e.g. admin
+//      jumped straight from "Picked Up" to "Delivered"), it is still
+//      shown — filled in automatically — because logically that step
+//      must have happened. Example:
+//        Picked Up -> (skip) -> Delivered
+//        shows: Booked -> Picked Up -> In Transit -> Out for Delivery -> Delivered
+//   3. If the admin later moves the status BACK (e.g. back to
+//      "In Transit"), only steps up to that point show again — the
+//      later steps (Out for Delivery, Delivered) disappear from the
+//      customer view, even though they're still kept in the DB for
+//      audit history.
+//        back to In Transit -> shows: Booked -> Picked Up -> In Transit
 const toCustomerView = (shipmentDoc) => {
   const obj = shipmentDoc.toObject ? shipmentDoc.toObject() : shipmentDoc;
-  if (Array.isArray(obj.trackingEvents)) {
-    obj.trackingEvents = obj.trackingEvents
-      .filter(ev => !ev.superseded)
-      .sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
-  }
-  return obj;
-};
+  const currentIdx = STATUS_ORDER.indexOf(obj.status);
+  if (currentIdx === -1) return obj; // unrecognized status, leave as-is
 
-// Recomputes which tracking events should be visible to customers based
-// on the shipment's CURRENT status, not the order events were created in.
-//
-// Example: events were added Booked -> Picked Up -> In Transit -> Out for
-// Delivery, then the admin sets status back to "Picked Up". This function
-// marks the "In Transit" and "Out for Delivery" events as superseded so
-// customers only see Booked -> Picked Up. If the admin later moves forward
-// again (e.g. back to "In Transit"), any previously-superseded event that
-// is still at or before the new status is un-hidden again, instead of
-// creating a duplicate.
-const recomputeVisibility = (shipment, newStatus) => {
-  const newIdx = STATUS_ORDER.indexOf(newStatus);
-  if (newIdx === -1) return;
-
-  shipment.trackingEvents.forEach((ev) => {
-    const evIdx = STATUS_ORDER.indexOf(ev.status);
-    if (evIdx === -1) return; // leave any unrecognized status untouched
-    ev.superseded = evIdx > newIdx;
+  // Keep the most recent real event recorded for each status name.
+  const eventsByStatus = {};
+  (obj.trackingEvents || []).forEach((ev) => {
+    const existing = eventsByStatus[ev.status];
+    if (!existing || new Date(ev.timestamp) > new Date(existing.timestamp)) {
+      eventsByStatus[ev.status] = ev;
+    }
   });
+
+  // Walk backwards from the current status down to "Booked". Use the
+  // real event where one exists; for a skipped step, borrow the
+  // timestamp of the nearest real step ahead of it so the timeline
+  // still reads in chronological order with no gaps.
+  const steps = [];
+  let fillTimestamp = obj.updatedAt || new Date();
+  for (let i = currentIdx; i >= 0; i--) {
+    const st = STATUS_ORDER[i];
+    const real = eventsByStatus[st];
+    if (real) {
+      fillTimestamp = real.timestamp;
+      steps.unshift(real);
+    } else {
+      steps.unshift({
+        status: st,
+        location: obj.destination || obj.origin || 'Hub',
+        description: `Status updated to ${st}`,
+        timestamp: fillTimestamp,
+      });
+    }
+  }
+
+  obj.trackingEvents = steps;
+  return obj;
 };
 
 // ── GET /shipments/stats/summary ──
@@ -348,13 +365,15 @@ router.put('/:id/status', async (req, res) => {
       });
     }
 
-    // Hide every event that sits AFTER the newly-set status in the
-    // normal lifecycle order, and un-hide everything at or before it.
-    recomputeVisibility(shipment, status);
-
     shipment.status = status;
     shipment.updatedAt = now;
-    if (status === 'Delivered') shipment.deliveredAt = now;
+    if (status === 'Delivered') {
+      shipment.deliveredAt = now;
+    } else if (shipment.deliveredAt) {
+      // Status was moved back from Delivered to an earlier step —
+      // clear the stale delivered timestamp so it doesn't linger.
+      shipment.deliveredAt = undefined;
+    }
 
     await shipment.save();
 
